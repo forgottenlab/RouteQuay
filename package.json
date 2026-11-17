@@ -1,0 +1,33 @@
+{
+  "name": "routequay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lightweight network access and server management toolkit.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "bin": {
+    "vpncp": "apps/cli/src/vpncp.ts"
+  },
+  "scripts": {
+    "vpncp": "node apps/cli/src/vpncp.ts",
+    "build": "npm run typecheck",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "node --test packages/core/test/config-shape.test.ts packages/core/test/client-summary.test.ts packages/exporters/test/shadowrocket-real.test.ts",
+    "test:safety": "node --test packages/core/test/redaction.test.ts packages/core/test/permissions.test.ts",
+    "test:adoption": "node --test apps/cli/test/adoption.test.ts",
+    "test:install": "node --test apps/cli/test/install.test.ts",
+    "test:ssh": "node --test packages/core/test/ssh-trust.test.ts",
+    "test:cli": "node --test apps/cli/test/adoption.test.ts apps/cli/test/install.test.ts",
+    "test:smoke": "node scripts/cli-smoke.mjs",
+    "check": "npm run typecheck && npm run test:unit && npm run test:safety && npm run test:ssh && npm run test:cli && npm run test:smoke && npm run check:candidate",
+    "test": "npm run check",
+    "check:candidate": "node scripts/check-candidate.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "5.9.3"
+  }
+}

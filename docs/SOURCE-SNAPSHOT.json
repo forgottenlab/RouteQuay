@@ -1,0 +1,112 @@
+{
+  "schemaVersion": "routequay-source-snapshot-v1",
+  "sourceHead": "02f378c0485cdba07def590c10353031e0573538",
+  "sourceState": "uncommitted-working-tree; reviewed-core-only",
+  "files": [
+    {
+      "path": "vpncp.cmd",
+      "sha256": "a60d368354ba5bea42fd6854cccdc5341de76919d38fd938b09d29e58c1bc083"
+    },
+    {
+      "path": "vpncp.ps1",
+      "sha256": "f00c302069fdf441042978597994ea1608ce9f1f5e8f6b3a76f2010451a51361"
+    },
+    {
+      "path": "apps/cli/src/vpncp.ts",
+      "sha256": "792c4be5c5fd857e820bd9eb70644d7c4d0939e1fb656abd2ca7e54eee517383"
+    },
+    {
+      "path": "apps/cli/test/adoption.test.ts",
+      "sha256": "70da18cca131d0f937230ed06f44da9792dba4aa641e2f34951c655a20a17cc4"
+    },
+    {
+      "path": "apps/cli/test/install.test.ts",
+      "sha256": "f4836a1d1b6916083ff93d66c253a40439de62ff32d3750f456e57b29d555d22"
+    },
+    {
+      "path": "packages/core/src/xray-adoption.ts",
+      "sha256": "8eff4431ec81f87d07655cf4e1bb1132570f01e8f4dec37e553415ed53529bbe"
+    },
+    {
+      "path": "packages/core/src/xray-install.ts",
+      "sha256": "03643a6ae77b918fc68a9597243698b79fa937408bc8b7d17d8a3b46f43f9998"
+    },
+    {
+      "path": "packages/core/src/linux-compatibility.ts",
+      "sha256": "7ef622669d36e0677fbbefa1296576d7b8c6ed86e87ed513d925aca28aaf3894"
+    },
+    {
+      "path": "packages/core/src/first-install-transaction.sh",
+      "sha256": "7ada651d1a10d7835e01cd3aa35a661fb3b69b50c1c1c8eaec4ee056f2bd211f"
+    },
+    {
+      "path": "packages/core/src/install-preflight.py",
+      "sha256": "b52158b4e94d45a680d06ac7fe9b36addaec6e9cfd177ba48c84c980b7c04e81"
+    },
+    {
+      "path": "packages/core/src/xray-install.sh",
+      "sha256": "fd723dba0809bc26b74a1e1e0b83764845686f3ed11d10974cdce6cfb747a12f"
+    },
+    {
+      "path": "packages/core/src/xray-adoption-probe.py",
+      "sha256": "be5f2f05f25a2f090f937205bcb0b3caa9a074e9fb821fda71a54fe966363680"
+    },
+    {
+      "path": "packages/core/src/protect-private-path.ps1",
+      "sha256": "a702a7b7dcdfa8451d46a3f7bbe2f91edbbe9585720e02b68fb34932b34bbe02"
+    },
+    {
+      "path": "packages/core/src/config-shape.ts",
+      "sha256": "9199d8cea298aa60fa55841d2f8530f087a7151be4e8f9124cb789c03d8ad237"
+    },
+    {
+      "path": "packages/core/src/client-summary.ts",
+      "sha256": "eb5dd132f176999cef64d2d14c0936509b043f164cc0e4778c61353a4b496e00"
+    },
+    {
+      "path": "packages/core/src/models.ts",
+      "sha256": "0fb7e0e1007daf2b91542698147d76fa530f0e031bb12d89ef151d6499cfeff9"
+    },
+    {
+      "path": "packages/core/src/redaction.ts",
+      "sha256": "81aa362441a2a392f3304c907a054bb6f0ebb30106a91d080f08ac787f8f63b9"
+    },
+    {
+      "path": "packages/core/test/config-shape.test.ts",
+      "sha256": "9280481053ee9d186025ef995f3e26bff6b5b52fe9096a5e0a979ed84f90bd95"
+    },
+    {
+      "path": "packages/core/test/client-summary.test.ts",
+      "sha256": "c94b7234e908611bba98415b1ee40651a56d07aad322a850a596f333cd85db17"
+    },
+    {
+      "path": "packages/core/test/redaction.test.ts",
+      "sha256": "88b650d7924aa58433aa2d3d50823e24f6128c9ba771d2b64e79446e5d8070b1"
+    },
+    {
+      "path": "packages/core/test/permissions.test.ts",
+      "sha256": "b55649369f4d967f24c7c6120b08aa3cadb5297469389813b105c83b058adfd0"
+    },
+    {
+      "path": "packages/exporters/src/shadowrocket-real.ts",
+      "sha256": "711f815eef76c9d059acc3b6262fc33d6badcc9c9327a359adfdf009d9a2cad0"
+    },
+    {
+      "path": "packages/exporters/test/shadowrocket-real.test.ts",
+      "sha256": "5408dbea4d92aeda5006b67ca03cf22c8436d87b1ce71bea3a49d1fcd2b4e8e3"
+    },
+    {
+      "path": "examples/config.example.json",
+      "sha256": "9c4cc0e769d42def6a0a8d806143bcf2ccb00615c44ca5cae52d5ba5dd09c492"
+    }
+  ],
+  "excluded": [
+    "source Git history",
+    ".ai history",
+    "backups",
+    "private node state and credentials",
+    "Web/Server/Manager",
+    "legacy operational scripts and real-node fixtures"
+  ],
+  "hashBasis": "Original source working-tree bytes before Git text normalization; not hashes of normalized Git blobs. Generated RouteQuay files, including LICENSE, are not copied-source entries."
+}
