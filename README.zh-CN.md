@@ -6,7 +6,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**当前状态：** 独立 Core-first 私有源码候选，**尚未正式发布**。
+**当前状态：** 已公开早期 Core-first 源码，尚未提供正式版本安装包或 GitHub Release。
 
 RouteQuay 是轻量、快捷、安全的网络接入与服务器管理工具，以简洁部署、本地优先、默认安全和明确可控为理念。**首次发布重点是 Xray CLI**，而不是完整的 VPN、内网组网平台或 Web 管理面板。
 
@@ -104,8 +104,8 @@ npm run test:safety
 
 ## 🤝 反馈与贡献
 
-公开后可以通过 GitHub Issue 反馈问题、需求或维护任务。ForgottenLab 的账户级 `.github` 仓库已经提供默认 Issue 表单与 PR 模板，项目没有自定义覆盖时会直接复用。英文或简体中文均可，无须重复写两份。
+现在可以通过 GitHub Issue 反馈问题、需求或维护任务。ForgottenLab 的账户级 `.github` 仓库已经提供默认 Issue 表单与 PR 模板，项目没有自定义覆盖时会直接复用。英文或简体中文均可，无须重复写两份。
 
 ## 📜 许可证
 
-RouteQuay 采用 [MIT License](LICENSE)，Copyright (c) 2026 ForgottenLab。本仓库仍为私有发布候选；许可证落地不等于授权公开。Xray 本体是采用独立 MPL-2.0 许可证的软件，不受本项目 MIT 许可替代。详见[许可证审阅](docs/LICENSE-REVIEW.md)。
+RouteQuay 采用 [MIT License](LICENSE)，Copyright (c) 2026 ForgottenLab。本仓库已公开源码，但尚未创建正式版本 Release 或独立安装包。Xray 本体是采用独立 MPL-2.0 许可证的软件，不受本项目 MIT 许可替代。详见[许可证审阅](docs/LICENSE-REVIEW.md)。

@@ -6,7 +6,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**Release status:** Private Core-first source candidate — **not yet published**.
+**Release status:** Public early-stage Core-first source snapshot. Versioned installers and GitHub Releases are not yet available.
 
 RouteQuay is a lightweight network access and server management toolkit. It is a local-first toolkit for explicit, inspectable network-access and server operations. Its **first supported scope is the Xray CLI**, not a full VPN, overlay network, or web administration platform.
 
@@ -104,8 +104,8 @@ See [Roadmap (简体中文)](docs/ROADMAP.zh-CN.md).
 
 ## 🤝 Feedback and contribution
 
-Bug reports, feature ideas, and maintenance tasks may be reported through GitHub Issues once the repository is public. ForgottenLab's account-level `.github` repository provides default Issue forms and a pull-request template to repositories that do not override them. English and Simplified Chinese are both welcome; submitting both is not required.
+Bug reports, feature ideas, and maintenance tasks can be reported through GitHub Issues. ForgottenLab's account-level `.github` repository provides default Issue forms and a pull-request template to repositories that do not override them. English and Simplified Chinese are both welcome; submitting both is not required.
 
 ## 📜 License
 
-RouteQuay is licensed under the [MIT License](LICENSE), Copyright (c) 2026 ForgottenLab. This repository remains a private release candidate; a license does not authorize public publication. Xray is separate software under its own MPL-2.0 license and is not relicensed by this project. See [license review](docs/LICENSE-REVIEW.md).
+RouteQuay is licensed under the [MIT License](LICENSE), Copyright (c) 2026 ForgottenLab. This repository is public; no tagged release or standalone installer is available yet. Xray is separate software under its own MPL-2.0 license and is not relicensed by this project. See [license review](docs/LICENSE-REVIEW.md).
