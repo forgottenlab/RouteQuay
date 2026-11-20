@@ -24,6 +24,7 @@ Several mature networking and Xray management projects already exist. RouteQuay 
 | Adopt an existing Xray installation without replacing it | Verified in integration tests |
 | Read-only deployment planning and node status | Implemented and tested |
 | Export a VLESS/REALITY client link for v2rayN | Verified end-to-end |
+| Export Mihomo YAML (`mihomo-provider` or `mihomo-profile`) | Local tests only; handshake with Xray 26.11.9 is unverified |
 | Explicitly update a server endpoint while preserving SSH host identity | Implemented and tested |
 | SSH identity checks, transaction recovery, local state protection | Implemented; see limitations |
 | Web management UI and broader network management | Experimental; **not part of the first stable scope** |
@@ -60,6 +61,10 @@ Run commands from the project checkout using PowerShell. `example-node` is an SS
 
 # Export a client URI to a protected local file; do not paste it into an issue.
 .\vpncp.cmd export example-node --to v2rayn
+
+# Mihomo / Clash Meta: a proxies list, or a minimal profile file.
+.\vpncp.cmd export example-node --to mihomo-provider
+.\vpncp.cmd export example-node --to mihomo-profile
 ```
 
 After reviewing a clean-host plan, `vpncp setup example-node --apply` explicitly approves installation. An existing host may instead be adopted. Read the planned operation and backup/restore information before approving changes.
@@ -72,6 +77,22 @@ When an existing server's public address legitimately changes, the CLI also prov
 ```
 
 This does **not** authorize a new SSH server identity. Strict host-key validation must continue to succeed. Do not use the example IP as a real destination.
+
+## Client export
+
+`vpncp export <node> --to <format>` writes a private file and prints the path only. It does not print the URI, YAML, UUID, REALITY public key, or short ID. `--out` chooses another path. The same bytes are left in place; different bytes are refused with `OUTPUT_EXISTS`.
+
+| `--to` | Default file | When to use it |
+|---|---|---|
+| `v2rayn` | `<ref>.vless.txt` | A client imports a VLESS URI. This remains the default when `--to` is omitted. |
+| `mihomo-provider` | `<ref>.mihomo-provider.yaml` | A Mihomo / Clash Meta profile already exists. The file is only a `proxies:` list, not a URI or base64 document. |
+| `mihomo-profile` | `<ref>.mihomo-profile.yaml` | FlClash or Mihomo needs a first file: one proxy, one `select` group, and a final `MATCH` rule. |
+
+Proxy and group names are `rq-<nodeId>-<clientRef>` and `rq-<nodeId>-<clientRef>-select`, so they do not collide in one file. Server `network: raw` is exported as `tcp`, matching the URI. `flow` is written only for `xtls-rprx-vision`. `encryption: none` is written only when the inbound decryption is omitted or `none`, which is also the URI's `encryption=none`. Mihomo treats that value as no extra VLESS encryption. `udp` and `packet-encoding` are omitted: the installer does not set packet encoding, and omitted `udp` is Mihomo's false default. The profile does not enable TUN, does not change system DNS, and is not a full routing ruleset.
+
+FlClash 0.9.0 and later can parse share links, including `vless://`. Its core calls Mihomo `ConvertsV2Ray`, and upstream has a VLESS REALITY round-trip test. Parsing a link is not a completed handshake with RouteQuay's pinned Xray 26.11.9, and a link has no groups or rules. YAML is the recommended FlClash path for that reason.
+
+Mihomo's TLS/REALITY documentation says it will not consider compatibility with xray-core v26.7.11 or newer. RouteQuay installs only 26.11.9 and does not set `minClientVer`. In that Xray version the default `minClientVer=26.3.27` assignment is commented out, and the bundled REALITY library skips the version check when `MinClientVer` is nil. This export does not change `minClientVer` and does not weaken REALITY. Treat Mihomo and FlClash interoperability as unverified until a real client matrix is run.
 
 ## 🧪 Testing
 

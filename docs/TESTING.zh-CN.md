@@ -29,6 +29,20 @@ npm run test:safety
 5. 验证没有真实凭据、测试云服务器地址或私有状态文件进入快照或 Git 历史。
 6. 若添加 CI，只运行无需 SSH 密钥、无需真实服务器的安全测试。
 
+## Mihomo YAML 导出
+
+`vpncp export --to v2rayn|mihomo-provider|mihomo-profile` 在本地 mock 中覆盖字段映射、IPv6、空 shortId、代理名与组名不冲突、未知 `--to`（含笼统的 `clash`）拒绝、内容不同则 `OUTPUT_EXISTS`、以及 JSON/人类可读输出不包含 URI、UUID、公钥或 shortId。`v2rayn` 仍写 `.vless.txt`。provider 只有 `proxies:`；profile 只有一个节点、一个 select 组和一条 `MATCH`，不写 TUN、DNS、`udp` 或 `packet-encoding`。
+
+这些检查不连接 SSH，也不与 FlClash 或 Mihomo 握手。Windows ACL 用例在 `process.platform !== 'win32'` 时直接返回，TAP 仍会计为通过；只在 Linux 上跑完测试，不能写成已经执行 Windows ACL。POSIX 文件 0600、目录 0700 只在实际执行该断言的系统上成立。
+
+兼容性口径与 README 相同：FlClash 0.9.0+ 可以解析 `vless://`，但解析成功不是握手成功；不把当前 26.11.9 安装写成必然拒绝 Mihomo；不把 `minClientVer` 改成 1.8.2，也不削弱 REALITY。
+
+### 2026-11-20 本地复测
+
+Linux、Node.js v22.23.4 上执行 `npm ci --ignore-scripts --no-audit --no-fund` 和 `npm run check`：类型检查通过；单元 16、安全 5、SSH 信任 2、CLI 39 全部通过，0 失败。smoke 与候选文件扫描（45 个文件）通过。没有连接 SSH，没有做 FlClash 或 Mihomo 握手。
+
+同一次 CLI 测试中，Windows ACL 用例因平台不是 win32 立即返回，TAP 仍把它计为通过。这次没有执行 Windows ACL。文件 0600 与目录 0700 的断言在这次 Linux 运行里执行并通过。
+
 ## 不能从当前结果推断的事项
 
 - 不代表对所有 Linux 版本或云服务商提供兼容保证。

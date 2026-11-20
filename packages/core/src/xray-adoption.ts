@@ -3,7 +3,8 @@ import { createHash, createPrivateKey, createPublicKey, randomUUID } from 'node:
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createShadowrocketLink } from '../../exporters/src/shadowrocket-real.ts';
+import { clientConnectionSpec, defaultExportFileName, isExportFormat, validateClientExportFields } from '../../exporters/src/client-connection.ts';
+import { renderClientExport } from '../../exporters/src/mihomo-yaml.ts';
 import { supportsFirstInstallPlatform, type LinuxEnvironment } from './linux-compatibility.ts';
 
 export class AdoptionError extends Error {
@@ -110,6 +111,17 @@ function exclusiveExport(path: string, data: string): void {
   try { writeFileSync(path, data, { mode: 0o600 }); }
   catch { storageFailure('private-file-write'); }
 }
+function commitExportFile(directory: string, output: string, body: string, customOut: boolean): 'unchanged' | 'exported' {
+  assertNoLinks(output);
+  if (existsSync(output) && !lstatSync(output).isSymbolicLink() && readFileSync(output, 'utf8') === body) {
+    protectPrivatePath(output, false);
+    return 'unchanged';
+  }
+  if (existsSync(output)) fail('OUTPUT_EXISTS');
+  if (!customOut) privateDirectory(directory);
+  exclusiveExport(output, body);
+  return 'exported';
+}
 export function privateWrite(path: string, data: string, replace = false): void {
   privateDirectory(dirname(path));
   if (existsSync(path) && (!replace || lstatSync(path).isSymbolicLink())) fail('OUTPUT_EXISTS');
@@ -214,7 +226,9 @@ export function runAdoption(options: AdoptionOptions, root = '.', transport = op
 
 function runAdoptionLocked(options: AdoptionOptions, root: string, transport: AdoptionTransport): AdoptionResult {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(options.nodeId)) fail('NODE_ID_INVALID');
-  if (options.to && options.to !== 'v2rayn') fail('EXPORT_FORMAT_UNSUPPORTED');
+  if (options.command !== 'export') {
+    if (options.to && options.to !== 'v2rayn') fail('EXPORT_FORMAT_UNSUPPORTED');
+  } else if (options.to && !isExportFormat(options.to)) fail('EXPORT_FORMAT_UNSUPPORTED');
   const directory = resolve(root, 'local/private/cli-nodes', options.nodeId);
   const statePath = join(directory, 'state.local.json');
   assertNoLinks(statePath);
@@ -300,35 +314,33 @@ function runAdoptionLocked(options: AdoptionOptions, root: string, transport: Ad
   }
   const selected = options.client ? candidates.find(item => item.ref === options.client) : candidates.length === 1 ? candidates[0] : undefined;
   if (!selected) fail(options.client ? 'CLIENT_NOT_FOUND' : 'CLIENT_SELECTION_REQUIRED');
+  const exportFormat = options.to ?? 'v2rayn';
+  if (!isExportFormat(exportFormat)) fail('EXPORT_FORMAT_UNSUPPORTED');
   const { inbound, client } = selected;
-  const reality = inbound.streamSettings.realitySettings;
-  if (!Array.isArray(reality.serverNames) || reality.serverNames.length !== 1
-      || !Array.isArray(reality.shortIds) || reality.shortIds.length !== 1) fail('REALITY_PARAMETERS_AMBIGUOUS');
-  const sni = reality.serverNames[0];
-  const shortId = reality.shortIds[0];
-  if (typeof sni !== 'string' || !/^[a-zA-Z0-9.-]+$/.test(sni)
-      || typeof shortId !== 'string' || !/^(?:[a-fA-F0-9]{2}){0,8}$/.test(shortId)) fail('REALITY_PARAMETERS_INVALID');
-  if (client.flow && client.flow !== 'xtls-rprx-vision') fail('FLOW_UNSUPPORTED');
+  const reality = inbound.streamSettings?.realitySettings && typeof inbound.streamSettings.realitySettings === 'object'
+    ? inbound.streamSettings.realitySettings : {};
+  const fields = validateClientExportFields({
+    network: inbound.streamSettings?.network ?? 'tcp',
+    flow: client.flow,
+    serverNames: reality.serverNames,
+    shortIds: reality.shortIds,
+    decryption: inbound.settings?.decryption
+  });
+  if (!fields.ok) fail(fields.code);
   const publicKey = realityPublicKey(reality.privateKey);
   if (!probe.listeners.some(address => address.endsWith(`:${inbound.port}`))) fail('INBOUND_NOT_LISTENING');
-  const uri = createShadowrocketLink({ inboundIndex: 0, protocol: 'vless', network: 'tcp', security: 'reality',
-    port: inbound.port, serverAddress: target.host, serverName: sni, shortId, publicKey,
-    fingerprint: 'chrome', includeFlow: Boolean(client.flow), clients: [] },
-    { displayName: options.nodeId, id: client.id, flow: client.flow },
-    { sniMode: 'explicit', allowUseServerNamesFromConfig: false, includeFlow: Boolean(client.flow) });
-  const output = resolve(options.out ?? join(directory, `${selected.ref}.vless.txt`));
+  const spec = clientConnectionSpec({
+    nodeId: options.nodeId, clientRef: selected.ref, server: target.host, port: inbound.port, uuid: client.id,
+    publicKey, network: fields.network, flow: fields.flow, serverName: fields.serverName, shortId: fields.shortId,
+    encryption: fields.encryption
+  });
+  const body = renderClientExport(exportFormat, spec);
+  const output = resolve(options.out ?? join(directory, defaultExportFileName(selected.ref, exportFormat)));
   if (readFileSync(statePath, 'utf8') !== originalState) fail('LOCAL_STATE_CHANGED', 3);
   if (!sameConnection(transport.resolve(target.alias), resolved)) fail('SSH_TARGET_CHANGED', 3);
-  assertNoLinks(output);
-  if (existsSync(output) && !lstatSync(output).isSymbolicLink() && readFileSync(output, 'utf8') === `${uri}\n`) {
-    protectPrivatePath(output, false);
-    return { ...result, status: 'unchanged', outputFile: output, client: selected.ref };
-  }
-  if (existsSync(output)) fail('OUTPUT_EXISTS');
-  if (!options.out) privateDirectory(directory);
-  exclusiveExport(output, `${uri}\n`);
-  return { ...result, status: 'exported', changed: true, outputFile: output, client: selected.ref,
-    format: 'vless-uri', fingerprint: 'chrome' };
+  const wrote = commitExportFile(directory, output, body, Boolean(options.out));
+  return { ...result, status: wrote, changed: wrote === 'exported', outputFile: output, client: selected.ref,
+    format: exportFormat === 'v2rayn' ? 'vless-uri' : exportFormat, fingerprint: 'chrome' };
 }
 export function realityPublicKey(value: unknown): string {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(value)) fail('REALITY_PRIVATE_KEY_INVALID');

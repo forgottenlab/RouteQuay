@@ -2,12 +2,12 @@ import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, existsSync, mkdirSync, writeFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateKeyPairSync } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { parseArguments } from '../src/vpncp.ts';
+import { parseArguments, renderHumanResult } from '../src/vpncp.ts';
 import { AdoptionError, parseSshConfig, runAdoption, realityPublicKey, privateDirectory, sshTargetArgs, type Probe, type AdoptionTransport } from '../../../packages/core/src/xray-adoption.ts';
 
 const keys = generateKeyPairSync('x25519');
@@ -36,6 +36,10 @@ test('default parameters, explicit overrides, unknown and duplicate flags', () =
   assert.equal(parseArguments(['setup', 'node-a']).to, 'v2rayn');
   assert.equal(parseArguments(['setup', 'node-a', '--ssh', 'alias', '--plan']).ssh, 'alias');
   assert.equal(parseArguments(['export', 'node-a', '--out', 'my file.txt', '--client', 'ref']).out, 'my file.txt');
+  assert.equal(parseArguments(['export', 'node-a', '--to', 'mihomo-provider']).to, 'mihomo-provider');
+  assert.equal(parseArguments(['export', 'node-a', '--to', 'mihomo-profile']).to, 'mihomo-profile');
+  rejects(() => parseArguments(['export', 'node-a', '--to', 'clash']), 'EXPORT_FORMAT_UNSUPPORTED');
+  rejects(() => parseArguments(['export', 'node-a', '--to', 'bad']), 'EXPORT_FORMAT_UNSUPPORTED');
   rejects(() => parseArguments(['status', 'a', '--plan']), 'UNKNOWN_OPTION');
   rejects(() => parseArguments(['setup', 'a', '--ssh']), 'OPTION_VALUE_REQUIRED');
   rejects(() => parseArguments(['setup', 'a', '--json', '--json']), 'DUPLICATE_OPTION');
@@ -302,4 +306,87 @@ test('replacement before isolation is retained, protocol participants cannot ent
   fs.unlinkSync(join(dir,'operation.guard/released.lock'));fs.rmdirSync(join(dir,'operation.guard'));
   assert.equal(runAdoption({command:'endpoint',nodeId:'a',expectedHost:'192.0.2.99'},f.root,f.transport).status,'endpoint-updated');
   assert.equal(readFileSync(join(dir,'state.local.json'),'utf8'),original);
+});
+test('mihomo provider and profile reuse the private export path and do not echo secrets', () => {
+  const f = fixture();
+  runAdoption({ command: 'setup', nodeId: 'a' }, f.root, f.transport);
+  const probed = f.calls.length;
+  rejects(() => runAdoption({ command: 'export', nodeId: 'a', to: 'clash' }, f.root, f.transport), 'EXPORT_FORMAT_UNSUPPORTED');
+  assert.equal(f.calls.length, probed);
+  const uri = runAdoption({ command: 'export', nodeId: 'a', to: 'v2rayn' }, f.root, f.transport);
+  const provider = runAdoption({ command: 'export', nodeId: 'a', to: 'mihomo-provider' }, f.root, f.transport);
+  const profile = runAdoption({ command: 'export', nodeId: 'a', to: 'mihomo-profile' }, f.root, f.transport);
+  assert.match(String(uri.outputFile), /\.vless\.txt$/);
+  assert.match(String(provider.outputFile), /\.mihomo-provider\.yaml$/);
+  assert.match(String(profile.outputFile), /\.mihomo-profile\.yaml$/);
+  assert.notEqual(uri.outputFile, provider.outputFile);
+  assert.notEqual(provider.outputFile, profile.outputFile);
+  const providerText = readFileSync(provider.outputFile as string, 'utf8');
+  const profileText = readFileSync(profile.outputFile as string, 'utf8');
+  assert.match(providerText, /^# .+\nproxies:\n/);
+  assert.equal(providerText.includes('proxy-groups:'), false);
+  assert.equal(providerText.includes('vless://'), false);
+  assert.match(profileText, /type: "select"/);
+  assert.match(profileText, /MATCH,rq-a-inbound-1-client-1-select/);
+  assert.equal(/(^|\n)tun\s*:/.test(profileText), false);
+  assert.equal(/(^|\n)dns\s*:/.test(profileText), false);
+  assert.equal(profileText.includes('packet-encoding:'), false);
+  assert.equal(/(^|\n)\s*udp\s*:/.test(profileText), false);
+  const publicKey = keys.publicKey.export({ format: 'der', type: 'spki' }).subarray(-32).toString('base64url');
+  for (const result of [uri, provider, profile]) {
+    const json = JSON.stringify(result);
+    const human = renderHumanResult(result);
+    for (const secret of [uuid, privateKey, publicKey, 'abcdef12', 'vless://', 'reality-opts', 'proxies:']) {
+      assert.equal(json.includes(secret), false, secret);
+      assert.equal(human.includes(secret), false, secret);
+    }
+    assert.equal(human.includes(String(result.outputFile)), true);
+  }
+  if (process.platform !== 'win32') {
+    const directory = join(f.root, 'local/private/cli-nodes/a');
+    assert.equal(statSync(directory).mode & 0o777, 0o700);
+    assert.equal(statSync(provider.outputFile as string).mode & 0o777, 0o600);
+    assert.equal(statSync(profile.outputFile as string).mode & 0o777, 0o600);
+    assert.equal(statSync(uri.outputFile as string).mode & 0o777, 0o600);
+  }
+  const original = providerText;
+  writeFileSync(provider.outputFile as string, `${original}# changed\n`);
+  rejects(() => runAdoption({ command: 'export', nodeId: 'a', to: 'mihomo-provider' }, f.root, f.transport), 'OUTPUT_EXISTS');
+  assert.equal(readFileSync(provider.outputFile as string, 'utf8'), `${original}# changed\n`);
+  writeFileSync(provider.outputFile as string, original);
+  assert.equal(runAdoption({ command: 'export', nodeId: 'a', to: 'mihomo-provider' }, f.root, f.transport).status, 'unchanged');
+  assert.equal(readFileSync(provider.outputFile as string, 'utf8'), original);
+});
+test('mihomo YAML keeps tcp, empty shortId and omits flow; other decryption is not relabeled', () => {
+  const f = fixture();
+  f.probe.config.inbounds[0].settings.clients.push({ id: '22222222-2222-4222-8222-222222222222' });
+  f.probe.config.inbounds[0].streamSettings.realitySettings.shortIds = [''];
+  f.probe.config.inbounds[0].settings.decryption = 'none';
+  runAdoption({ command: 'setup', nodeId: 'a' }, f.root, f.transport);
+  const result = runAdoption({ command: 'export', nodeId: 'a', client: 'inbound-1-client-2', to: 'mihomo-profile' }, f.root, f.transport);
+  const yaml = readFileSync(result.outputFile as string, 'utf8');
+  assert.match(yaml, /network: "tcp"/);
+  assert.match(yaml, /short-id: ""/);
+  assert.match(yaml, /encryption: "none"/);
+  assert.match(yaml, /name: "rq-a-inbound-1-client-2"/);
+  assert.match(yaml, /name: "rq-a-inbound-1-client-2-select"/);
+  assert.equal(yaml.includes('flow:'), false);
+  const blocked = fixture();
+  blocked.probe.config.inbounds[0].settings.decryption = 'mlkem768x25519plus.example';
+  runAdoption({ command: 'setup', nodeId: 'a' }, blocked.root, blocked.transport);
+  const output = join(blocked.root, 'blocked.yaml');
+  rejects(() => runAdoption({ command: 'export', nodeId: 'a', to: 'mihomo-provider', out: output }, blocked.root, blocked.transport), 'DECRYPTION_UNSUPPORTED');
+  rejects(() => runAdoption({ command: 'export', nodeId: 'a', to: 'v2rayn', out: join(blocked.root, 'blocked.txt') }, blocked.root, blocked.transport), 'DECRYPTION_UNSUPPORTED');
+  assert.equal(existsSync(output), false);
+  assert.equal(existsSync(join(blocked.root, 'blocked.txt')), false);
+});
+test('IPv6 export host is bracketed in the URI and quoted in YAML', () => {
+  const f = fixture();
+  f.transport.resolve = alias => ({ alias, host: '2001:db8::10', user: 'root', port: 25281 });
+  runAdoption({ command: 'setup', nodeId: 'a' }, f.root, f.transport);
+  const uri = runAdoption({ command: 'export', nodeId: 'a', to: 'v2rayn' }, f.root, f.transport);
+  const yaml = runAdoption({ command: 'export', nodeId: 'a', to: 'mihomo-provider' }, f.root, f.transport);
+  assert.match(readFileSync(uri.outputFile as string, 'utf8'), /@\[2001:db8::10\]:8443\?/);
+  assert.match(readFileSync(yaml.outputFile as string, 'utf8'), /server: "2001:db8::10"/);
+  assert.equal(JSON.stringify(yaml).includes('2001:db8::10'), false);
 });
