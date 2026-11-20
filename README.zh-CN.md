@@ -24,6 +24,7 @@ RouteQuay 是轻量、快捷、安全的网络接入与服务器管理工具，�
 | 接管现有 Xray 而不直接替换已有配置 | 已完成实机验证 |
 | 部署只读计划与节点状态查看 | 已实现并测试 |
 | 导出 v2rayN 可使用的 VLESS/REALITY 节点 | 已完成端到端验证 |
+| 导出 Mihomo YAML（`mihomo-provider` 或 `mihomo-profile`） | 仅有本地测试；与 Xray 26.11.9 的握手未验证 |
 | 显式更新公网地址并保留 SSH 主机身份 | 已实现并测试 |
 | SSH 身份保护、事务恢复和本地状态保护 | 已实现，存在明确使用边界 |
 | Web 可视化管理及更广泛的网络功能 | 实验阶段，**不属于首发稳定范围** |
@@ -60,6 +61,10 @@ npm run check
 
 # 导出到受保护的本地文件，不要公开完整 VLESS URI。
 .\vpncp.cmd export example-node --to v2rayn
+
+# Mihomo / Clash Meta：已有配置用节点列表，首次导入用最小配置文件。
+.\vpncp.cmd export example-node --to mihomo-provider
+.\vpncp.cmd export example-node --to mihomo-profile
 ```
 
 空机计划审核后使用 `vpncp setup example-node --apply` 显式确认安装；已有 Xray 实例可能进入接管流程。在应用任何更改前，应先确认计划、备份和恢复方式。
@@ -72,6 +77,22 @@ npm run check
 ```
 
 这不是信任陌生服务器的操作。必须继续通过严格 SSH 主机密钥验证。
+
+## 客户端导出
+
+`vpncp export <node> --to <格式>` 只把文件写到私有目录，终端只打印路径，不打印 URI、YAML、UUID、REALITY 公钥或 shortId。`--out` 可指定其他路径。内容相同则保留原文件；内容不同则拒绝并返回 `OUTPUT_EXISTS`。
+
+| `--to` | 默认文件 | 适用情况 |
+|---|---|---|
+| `v2rayn` | `<ref>.vless.txt` | 客户端导入 VLESS URI。省略 `--to` 时仍使用此格式。 |
+| `mihomo-provider` | `<ref>.mihomo-provider.yaml` | 已经有 Mihomo / Clash Meta 配置。文件只有 `proxies:` 列表，不含 URI 或 base64。 |
+| `mihomo-profile` | `<ref>.mihomo-profile.yaml` | FlClash 或 Mihomo 需要第一份文件：一个节点、一个 `select` 组、一条末尾 `MATCH` 规则。 |
+
+代理名是 `rq-<节点 id>-<客户端 ref>`，策略组名在其后加 `-select`，同一文件里不会重名。服务器 `network: raw` 导出为 `tcp`，与 URI 一致。只有客户端带 `xtls-rprx-vision` 时才写 `flow`。入站 `decryption` 省略或为 `none` 时才写 `encryption: none`，这也是 URI 里的 `encryption=none`；Mihomo 把这个值当作没有额外的 VLESS 加密。不写 `udp` 和 `packet-encoding`：安装器没有配置数据包编码，而 Mihomo 在省略 `udp` 时默认为 false。profile 不开启 TUN，不改系统 DNS，也不是一套完整路由规则。
+
+FlClash 0.9.0 及更新版本可以解析分享链接，包括 `vless://`。其核心调用 Mihomo 的 `ConvertsV2Ray`，上游有 VLESS REALITY 往返测试。链接解析成功不等于已经和 RouteQuay 固定的 Xray 26.11.9 完成握手，分享链接里也没有策略组或规则。因此仍建议 FlClash 使用 YAML。
+
+Mihomo 的 TLS/REALITY 文档写明不考虑与 xray-core v26.7.11 及更新版本的兼容。RouteQuay 只安装 26.11.9，并且不设置 `minClientVer`。该 Xray 版本里，默认的 `minClientVer=26.3.27` 赋值已被注释；捆绑的 REALITY 库在 `MinClientVer` 为 nil 时跳过版本检查。本次导出不会修改 `minClientVer`，也不会为了兼容而削弱 REALITY。在真实客户端矩阵跑通之前，Mihomo 与 FlClash 的互通视为未验证。
 
 ## 🧪 测试
 

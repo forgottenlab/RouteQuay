@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { AdoptionError, runAdoption, type AdoptionOptions } from '../../../packages/core/src/xray-adoption.ts';
+import { AdoptionError, runAdoption, type AdoptionOptions, type AdoptionResult } from '../../../packages/core/src/xray-adoption.ts';
+import { isExportFormat } from '../../../packages/exporters/src/client-connection.ts';
 import { runSetup, type SetupOptions } from '../../../packages/core/src/xray-install.ts';
 import { createInterface } from 'node:readline/promises';
 
@@ -9,7 +10,7 @@ export const help = `vpncp — 通过 OpenSSH 接管现有 Xray
   vpncp setup <node> [--ssh <Host>] [--plan | --apply] [--port 8443] [--json]
   vpncp status <node> [--ssh <Host>] [--json]
   vpncp endpoint <node> --host <new-host> [--json]
-  vpncp export <node> --to v2rayn [--client <ref>] [--out <path>] [--json]
+  vpncp export <node> --to v2rayn|mihomo-provider|mihomo-profile [--client <ref>] [--out <path>] [--json]
 
 默认 SSH Host 与 node 同名；接管后复用已保存的 Host。
 setup 接管已有实例；干净 Debian 13 / Ubuntu 24.04 LTS 可安装固定 Xray 26.11.9。
@@ -22,7 +23,10 @@ setup 接管已有实例；干净 Debian 13 / Ubuntu 24.04 LTS 可安装固定 X
 REALITY 默认 www.cloudflare.com:443，执行前验证 TLS1.3 与证书，失败则停止。
 endpoint 仅显式更新已接管节点的连接地址；使用原地址的可信 SSH 主机密钥，要求配置及运行状态一致。
 更新后 export --out <新文件路径>，保留旧导出；不改 SSH 配置和历史安装日志。
-export 保存 VLESS URI，默认使用 chrome 指纹；不在终端显示链接。
+export 写入私有文件，不在终端显示 URI、YAML、UUID、公钥或 shortId。
+--to v2rayn 写 VLESS URI（.vless.txt）。--to mihomo-provider 只写 proxies 列表。
+--to mihomo-profile 写最小配置：一个节点、一个 select 组、一条 MATCH；不开启 TUN，不改系统 DNS。
+默认 chrome 指纹。服务器 network 为 raw 时仍导出 tcp。不声明 UDP，不写 packet-encoding。
 多客户端时通过 status 返回的 ref 选择。防火墙与 SSH 配置不会自动调整。
 退出码 0 完成，2 参数或不支持，3 基线/目标冲突，4 连接或本地 I/O 失败。
 `;
@@ -68,9 +72,24 @@ export function parseArguments(args: string[]): SetupOptions {
     } else throw new AdoptionError('UNKNOWN_OPTION');
   }
   if (command === 'endpoint' && !options.expectedHost) throw new AdoptionError('ENDPOINT_CONFIRMATION_REQUIRED', 3);
-  if (options.to !== 'v2rayn') throw new AdoptionError('EXPORT_FORMAT_UNSUPPORTED');
+  if (command === 'export' ? !isExportFormat(options.to) : options.to !== 'v2rayn') throw new AdoptionError('EXPORT_FORMAT_UNSUPPORTED');
   if (options.plan && options.apply) throw new AdoptionError('CONFLICTING_OPTIONS');
   return options;
+}
+export function renderHumanResult(result: AdoptionResult): string {
+  const lines = [
+    `${result.nodeId} · ${result.status}`,
+    `SSH ${result.ssh} · Xray ${result.version ?? '未知'} · 服务 ${result.service}`,
+    `检查时间 ${result.checkedAt}`,
+    `客户端 ${(result.clients as string[]).join(', ') || '无'}`
+  ];
+  if ('plan' in result) lines.push(JSON.stringify(result.plan, null, 2));
+  if ('networkStatus' in result) lines.push(`网络验证 ${result.networkStatus}`);
+  if (result.outputFile) lines.push(`私有导出 ${result.outputFile}`);
+  if (result.format) lines.push(`导出格式 ${result.format}`);
+  if (result.code) lines.push(`原因 ${result.code}`);
+  lines.push(`未验证 ${(result.unverified as string[]).join(', ')}`);
+  return lines.join('\n');
 }
 export async function main(args = process.argv.slice(2)): Promise<number> {
   if (args.includes('--help') || args.length === 0) { console.log(help); return 0; }
@@ -86,17 +105,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
         finally { prompt.close(); }
       } : undefined) : runAdoption(options, root);
     if (options.json) console.log(JSON.stringify(result));
-    else {
-      console.log(`${result.nodeId} · ${result.status}`);
-      console.log(`SSH ${result.ssh} · Xray ${result.version ?? '未知'} · 服务 ${result.service}`);
-      console.log(`检查时间 ${result.checkedAt}`);
-      console.log(`客户端 ${(result.clients as string[]).join(', ') || '无'}`);
-      if ('plan' in result) console.log(JSON.stringify(result.plan, null, 2));
-      if ('networkStatus' in result) console.log(`网络验证 ${result.networkStatus}`);
-      if (result.outputFile) console.log(`私有导出 ${result.outputFile}`);
-      if (result.code) console.log(`原因 ${result.code}`);
-      console.log(`未验证 ${(result.unverified as string[]).join(', ')}`);
-    }
+    else console.log(renderHumanResult(result));
     return result.code ? (['unknown', 'failed-restored', 'rollback-failed', 'installed-local-state-incomplete',
       'completed-cleanup-failed', 'cleanup-failed'].includes(result.status) ? 4 : 2) : 0;
   } catch (error) {
