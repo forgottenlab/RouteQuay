@@ -32,7 +32,8 @@ function proxyLines(spec: ClientConnectionSpec): string[] {
     `    encryption: "none"`,
     `    reality-opts:`,
     `      public-key: ${quoteYaml(spec.publicKey)}`,
-    `      short-id: ${quoteYaml(spec.shortId)}`
+    `      short-id: ${quoteYaml(spec.shortId)}`,
+    `      support-x25519mlkem768: true`
   );
   const [first, ...rest] = lines;
   return [`  - ${first.trimStart()}`, ...rest];

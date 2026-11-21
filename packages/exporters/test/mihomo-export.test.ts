@@ -72,6 +72,7 @@ test("raw network, vision flow and decryption none map once for URI and YAML", (
     assert.match(yaml, /encryption: "none"/);
     assert.match(yaml, new RegExp(`public-key: "${publicKey}"`));
     assert.match(yaml, /short-id: "abcdef12"/);
+    assert.match(yaml, /support-x25519mlkem768: true/);
     assert.equal(yaml.includes("cipher:"), false);
     assert.equal(yaml.includes("alterId:"), false);
     assert.equal(yaml.includes("packet-encoding:"), false);
