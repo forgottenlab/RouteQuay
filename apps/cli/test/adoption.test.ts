@@ -38,6 +38,7 @@ test('default parameters, explicit overrides, unknown and duplicate flags', () =
   assert.equal(parseArguments(['export', 'node-a', '--out', 'my file.txt', '--client', 'ref']).out, 'my file.txt');
   assert.equal(parseArguments(['export', 'node-a', '--to', 'mihomo-provider']).to, 'mihomo-provider');
   assert.equal(parseArguments(['export', 'node-a', '--to', 'mihomo-profile']).to, 'mihomo-profile');
+  assert.equal(parseArguments(['export', 'node-a', '--to', 'vless-qr']).to, 'vless-qr');
   rejects(() => parseArguments(['export', 'node-a', '--to', 'clash']), 'EXPORT_FORMAT_UNSUPPORTED');
   rejects(() => parseArguments(['export', 'node-a', '--to', 'bad']), 'EXPORT_FORMAT_UNSUPPORTED');
   rejects(() => parseArguments(['status', 'a', '--plan']), 'UNKNOWN_OPTION');
@@ -324,6 +325,7 @@ test('mihomo provider and profile reuse the private export path and do not echo 
   const providerText = readFileSync(provider.outputFile as string, 'utf8');
   const profileText = readFileSync(profile.outputFile as string, 'utf8');
   assert.match(providerText, /^# .+\nproxies:\n/);
+  assert.match(providerText, /support-x25519mlkem768: true/);
   assert.equal(providerText.includes('proxy-groups:'), false);
   assert.equal(providerText.includes('vless://'), false);
   assert.match(profileText, /type: "select"/);
@@ -379,6 +381,28 @@ test('mihomo YAML keeps tcp, empty shortId and omits flow; other decryption is n
   rejects(() => runAdoption({ command: 'export', nodeId: 'a', to: 'v2rayn', out: join(blocked.root, 'blocked.txt') }, blocked.root, blocked.transport), 'DECRYPTION_UNSUPPORTED');
   assert.equal(existsSync(output), false);
   assert.equal(existsSync(join(blocked.root, 'blocked.txt')), false);
+});
+test('vless-qr writes a protected PNG without echoing the URI in terminal output', () => {
+  const f = fixture();
+  runAdoption({ command: 'setup', nodeId: 'a' }, f.root, f.transport);
+  const qr = runAdoption({ command: 'export', nodeId: 'a', to: 'vless-qr' }, f.root, f.transport);
+  assert.match(String(qr.outputFile), /\.vless\.png$/);
+  assert.equal(qr.format, 'vless-qr-png');
+  const bytes = readFileSync(qr.outputFile as string);
+  assert.equal(bytes.subarray(0, 8).toString('binary'), '\x89PNG\r\n\x1a\n');
+  const json = JSON.stringify(qr);
+  const human = renderHumanResult(qr);
+  const publicKey = keys.publicKey.export({ format: 'der', type: 'spki' }).subarray(-32).toString('base64url');
+  for (const secret of [uuid, privateKey, publicKey, 'abcdef12', 'vless://']) {
+    assert.equal(json.includes(secret), false, secret);
+    assert.equal(human.includes(secret), false, secret);
+  }
+  assert.equal(human.includes(String(qr.outputFile)), true);
+  if (process.platform !== 'win32') {
+    assert.equal(statSync(qr.outputFile as string).mode & 0o777, 0o600);
+  }
+  writeFileSync(qr.outputFile as string, Buffer.concat([bytes, Buffer.from([0])]));
+  rejects(() => runAdoption({ command: 'export', nodeId: 'a', to: 'vless-qr' }, f.root, f.transport), 'OUTPUT_EXISTS');
 });
 test('IPv6 export host is bracketed in the URI and quoted in YAML', () => {
   const f = fixture();
