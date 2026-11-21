@@ -22,7 +22,7 @@ export type ClientConnectionSpec = {
   protocol: "vless";
 };
 
-export const exportFormats = ["v2rayn", "mihomo-provider", "mihomo-profile"] as const;
+export const exportFormats = ["v2rayn", "vless-qr", "mihomo-provider", "mihomo-profile"] as const;
 export type ExportFormat = (typeof exportFormats)[number];
 
 export type ValidatedExportFields = {
@@ -37,7 +37,7 @@ export type ValidatedExportFields = {
 export type ExportFieldFailure = { ok: false; code: string };
 
 export function isExportFormat(value: string | undefined): value is ExportFormat {
-  return value === "v2rayn" || value === "mihomo-provider" || value === "mihomo-profile";
+  return value === "v2rayn" || value === "vless-qr" || value === "mihomo-provider" || value === "mihomo-profile";
 }
 
 export function validateClientExportFields(input: {
@@ -114,6 +114,7 @@ export function mihomoGroupName(spec: Pick<ClientConnectionSpec, "nodeId" | "cli
 export function defaultExportFileName(clientRef: string, format: ExportFormat): string {
   if (format === "mihomo-provider") return `${clientRef}.mihomo-provider.yaml`;
   if (format === "mihomo-profile") return `${clientRef}.mihomo-profile.yaml`;
+  if (format === "vless-qr") return `${clientRef}.vless.png`;
   return `${clientRef}.vless.txt`;
 }
 

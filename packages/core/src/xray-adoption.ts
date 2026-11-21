@@ -5,6 +5,9 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { clientConnectionSpec, defaultExportFileName, isExportFormat, validateClientExportFields } from '../../exporters/src/client-connection.ts';
 import { renderClientExport } from '../../exporters/src/mihomo-yaml.ts';
+import { renderVlessQrPng } from '../../exporters/src/vless-qr.ts';
+
+type ExportBody = string | Buffer;
 import { supportsFirstInstallPlatform, type LinuxEnvironment } from './linux-compatibility.ts';
 
 export class AdoptionError extends Error {
@@ -102,7 +105,7 @@ function assertNoLinks(path: string): void {
     if (existsSync(current) && lstatSync(current).isSymbolicLink()) fail('PRIVATE_PATH_UNSAFE');
   }
 }
-function exclusiveExport(path: string, data: string): void {
+function exclusiveExport(path: string, data: ExportBody): void {
   assertNoLinks(path);
   // For custom paths, protect the new empty file before putting credentials in it.
   try { writeFileSync(path, '', { flag: 'wx', mode: 0o600 }); }
@@ -111,9 +114,13 @@ function exclusiveExport(path: string, data: string): void {
   try { writeFileSync(path, data, { mode: 0o600 }); }
   catch { storageFailure('private-file-write'); }
 }
-function commitExportFile(directory: string, output: string, body: string, customOut: boolean): 'unchanged' | 'exported' {
+function exportBodiesEqual(existing: Buffer, body: ExportBody): boolean {
+  const next = typeof body === 'string' ? Buffer.from(body, 'utf8') : body;
+  return existing.length === next.length && existing.equals(next);
+}
+function commitExportFile(directory: string, output: string, body: ExportBody, customOut: boolean): 'unchanged' | 'exported' {
   assertNoLinks(output);
-  if (existsSync(output) && !lstatSync(output).isSymbolicLink() && readFileSync(output, 'utf8') === body) {
+  if (existsSync(output) && !lstatSync(output).isSymbolicLink() && exportBodiesEqual(readFileSync(output), body)) {
     protectPrivatePath(output, false);
     return 'unchanged';
   }
@@ -334,13 +341,17 @@ function runAdoptionLocked(options: AdoptionOptions, root: string, transport: Ad
     publicKey, network: fields.network, flow: fields.flow, serverName: fields.serverName, shortId: fields.shortId,
     encryption: fields.encryption
   });
-  const body = renderClientExport(exportFormat, spec);
+  const body: ExportBody = exportFormat === 'vless-qr'
+    ? renderVlessQrPng(spec)
+    : renderClientExport(exportFormat, spec);
   const output = resolve(options.out ?? join(directory, defaultExportFileName(selected.ref, exportFormat)));
   if (readFileSync(statePath, 'utf8') !== originalState) fail('LOCAL_STATE_CHANGED', 3);
   if (!sameConnection(transport.resolve(target.alias), resolved)) fail('SSH_TARGET_CHANGED', 3);
   const wrote = commitExportFile(directory, output, body, Boolean(options.out));
+  const formatLabel = exportFormat === 'v2rayn' ? 'vless-uri'
+    : exportFormat === 'vless-qr' ? 'vless-qr-png' : exportFormat;
   return { ...result, status: wrote, changed: wrote === 'exported', outputFile: output, client: selected.ref,
-    format: exportFormat === 'v2rayn' ? 'vless-uri' : exportFormat, fingerprint: 'chrome' };
+    format: formatLabel, fingerprint: 'chrome' };
 }
 export function realityPublicKey(value: unknown): string {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(value)) fail('REALITY_PRIVATE_KEY_INVALID');

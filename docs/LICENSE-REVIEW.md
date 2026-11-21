@@ -14,9 +14,13 @@
 |---|---|---|
 | TypeScript 5.9.3 | Apache-2.0 | 开发依赖，不提交 node_modules；保留包内许可 |
 | @types/node 22.20.5 | MIT | 开发依赖，包内许可保持 |
+| @types/pngjs 6.0.5 | MIT | 开发依赖，包内许可保持 |
+| jsqr 1.4.0 | Apache-2.0 | 开发依赖，仅离线二维码解码测试；包内许可保持 |
 | undici-types 6.21.0 | MIT | 传递开发依赖，包内许可保持 |
+| qrcode-generator 1.5.2 | MIT | 生产依赖，离线 VLESS 二维码矩阵生成；包内许可保持 |
+| pngjs 7.0.0 | MIT | 生产依赖，PNG 编码；包内许可保持 |
 | Xray | MPL-2.0 | 不复制本体源码或二进制；运行时另从官方固定版本下载，独立适用上游许可 |
 
-项目无生产 npm 依赖。Xray 的下载/调用不表示其本体改用 MIT；若未来重新分发它的二进制或源码，应针对实际版本处理源码提供和通知等义务。[上游许可](https://github.com/XTLS/Xray-core/blob/main/LICENSE)。
+生产 npm 依赖仅用于 CLI 离线 VLESS 二维码导出，均为 MIT，与 RouteQuay 的 MIT 兼容。Xray 的下载/调用不表示其本体改用 MIT；若未来重新分发它的二进制或源码，应针对实际版本处理源码提供和通知等义务。[上游许可](https://github.com/XTLS/Xray-core/blob/main/LICENSE)。
 
 本轮只授权 Private Commit/Push，未授权修改可见性、打标签、Release 或 npm 发布。MIT 已选定；公开仍需要维护者单独批准。
