@@ -24,9 +24,9 @@ RouteQuay 是轻量、快捷、安全的网络接入与服务器管理工具，�
 | 接管现有 Xray 而不直接替换已有配置 | 已完成实机验证 |
 | 部署只读计划与节点状态查看 | 已实现并测试 |
 | 导出 v2rayN 可使用的 VLESS/REALITY 节点 | 已完成端到端验证 |
-| 导出本地 VLESS 二维码 PNG（`vless-qr`） | 离线单元测试已覆盖；2026-11-21 在两台已记录节点上，v2rayN 图形界面导入官方 PNG 成功 |
-| 导出 Mihomo YAML（`mihomo-provider` 或 `mihomo-profile`） | 2026-11-21 有限记录：Ubuntu 24.04 与 Debian 13、Xray 26.11.9 上，Mihomo 1.19.33 需要未加引号的 `support-x25519mlkem768: true`；FlClash 0.9.4 导入了这些 profile。不覆盖全部版本组合 |
-| 导出本地 sing-box JSON（`sing-box`） | 2026-11-23 官方 sing-box 1.14.4 的 `check` 接受了合成文件。尚未与 Xray 26.11.9 做握手 |
+| 导出本地 VLESS 二维码 PNG（`vless-qr`） | 离线单元测试已覆盖；2026-11-21 在两台已记录节点上，v2rayN 图形界面导入官方 PNG 成功。2026-11-23：Shadowrocket 导入了与 v2rayN 粘贴相同的剪贴板 `vless://` URI，并扫码导入离线 VLESS 二维码。只记录导入，没有流量或出口结果 |
+| 导出 Mihomo YAML（`mihomo-provider` 或 `mihomo-profile`） | 2026-11-21：Ubuntu 24.04 与 Debian 13、Xray 26.11.9 上，Mihomo 1.19.33 需要未加引号的 `support-x25519mlkem768: true`。2026-11-23：FlClash 0.9.4 以文件导入直接导入官方 `mihomo-profile`，两台验收节点的延迟测试成功。请导入官方导出，不要使用编辑过的测试副本。不覆盖全部版本组合 |
+| 导出本地 sing-box JSON（`sing-box`） | 2026-11-23：官方导出 JSON 通过 sing-box 1.14.4 的 `sing-box check -c`。对 Xray 26.11.9 的 REALITY 握手失败（`reality verification failed`）。官方 1.14.4 会从 REALITY ClientHello 去掉 `X25519MLKEM768`。同一路径上 Mihomo 1.19.33 使用官方字段 `reality-opts.support-x25519mlkem768: true` 时成功。不要削弱服务器 REALITY、修改 `minClientVer` 或添加非官方字段 |
 | 显式更新公网地址并保留 SSH 主机身份 | 已实现并测试 |
 | SSH 身份保护、事务恢复和本地状态保护 | 已实现，存在明确使用边界 |
 | Web 可视化管理及更广泛的网络功能 | 实验阶段，**不属于首发稳定范围** |
@@ -96,11 +96,11 @@ npm run check
 | `mihomo-profile` | `<ref>.mihomo-profile.yaml` | FlClash 或 Mihomo 需要第一份文件：一个节点、一个 `select` 组、一条末尾 `MATCH` 规则。 |
 | `sing-box` | `<ref>.sing-box.json` | 本地 sing-box 配置：一个 VLESS 出站、一个 `selector`、`route.final` 指向该 selector。不写入站，不开启 TUN，不改 DNS。 |
 
-代理名是 `rq-<节点 id>-<客户端 ref>`，策略组名在其后加 `-select`，同一文件里不会重名。服务器 `network: raw` 导出为 `tcp`，与 URI 一致。只有客户端带 `xtls-rprx-vision` 时才写 `flow`。入站 `decryption` 省略或为 `none` 时才写 `encryption: none`，这也是 URI 里的 `encryption=none`；Mihomo 把这个值当作没有额外的 VLESS 加密。`reality-opts` 另写 `support-x25519mlkem768: true`（布尔、不引号），供 Xray 26.11.9 的 ML-KEM。2026-11-21 的记录里，两台已测 VPS 上的隔离 Mihomo 1.19.33 在 REALITY HTTPS 成功前需要该字段。FlClash 0.9.4（内嵌 Mihomo 1.19.34）导入的是已经带有该字段的 profile。不保证所有 Mihomo/Xray 组合。不写 `udp` 和 `packet-encoding`：安装器没有配置数据包编码，而 Mihomo 在省略 `udp` 时默认为 false。profile 不开启 TUN，不改系统 DNS，也不是一套完整路由规则。
+代理名是 `rq-<节点 id>-<客户端 ref>`，策略组名在其后加 `-select`，同一文件里不会重名。服务器 `network: raw` 导出为 `tcp`，与 URI 一致。只有客户端带 `xtls-rprx-vision` 时才写 `flow`。入站 `decryption` 省略或为 `none` 时才写 `encryption: none`，这也是 URI 里的 `encryption=none`；Mihomo 把这个值当作没有额外的 VLESS 加密。`reality-opts` 另写 `support-x25519mlkem768: true`（布尔、不引号），供 Xray 26.11.9 的 ML-KEM。2026-11-21 的记录里，两台已测 VPS 上的隔离 Mihomo 1.19.33 在 REALITY HTTPS 成功前需要该字段。FlClash 0.9.4（内嵌 Mihomo 1.19.34）在那天导入的是已经带有该字段的测试 profile。2026-11-23 复测中，FlClash 0.9.4 以文件导入直接导入官方 `mihomo-profile`，两台验收节点的延迟测试成功。请导入官方导出，不要使用编辑过的测试副本。不保证所有 Mihomo/Xray 组合。不写 `udp` 和 `packet-encoding`：安装器没有配置数据包编码，而 Mihomo 在省略 `udp` 时默认为 false。profile 不开启 TUN，不改系统 DNS，也不是一套完整路由规则。
 
 FlClash 0.9.0 及更新版本可以解析分享链接，包括 `vless://`。其核心调用 Mihomo 的 `ConvertsV2Ray`，上游有 VLESS REALITY 往返测试。链接解析成功不等于已经和 RouteQuay 固定的 Xray 26.11.9 完成握手，分享链接里也没有策略组或规则。因此仍建议 FlClash 使用 YAML。
 
-Mihomo 的 TLS/REALITY 文档写明不考虑与 xray-core v26.7.11 及更新版本的兼容。RouteQuay 只安装 26.11.9，并且不设置 `minClientVer`。该 Xray 版本里，默认的 `minClientVer=26.3.27` 赋值已被注释；捆绑的 REALITY 库在 `MinClientVer` 为 nil 时跳过版本检查。本次导出不会修改 `minClientVer`，也不会为了兼容而削弱 REALITY。2026-11-21（Asia/Shanghai）在两台已测 VPS 上对 Mihomo 1.19.33 与 FlClash 0.9.4 的有限检查写在测试说明里。该记录不延伸到全部 Mihomo/Xray 组合，不包括合并后对官方文件再跑一遍隔离 HTTPS，也不把扫描 VLESS 二维码当成携带 Mihomo YAML ML-KEM 字段的方式。
+Mihomo 的 TLS/REALITY 文档写明不考虑与 xray-core v26.7.11 及更新版本的兼容。RouteQuay 只安装 26.11.9，并且不设置 `minClientVer`。该 Xray 版本里，默认的 `minClientVer=26.3.27` 赋值已被注释；捆绑的 REALITY 库在 `MinClientVer` 为 nil 时跳过版本检查。本次导出不会修改 `minClientVer`，也不会为了兼容而削弱 REALITY。2026-11-21（Asia/Shanghai）在两台已测 VPS 上对 Mihomo 1.19.33 与 FlClash 0.9.4 的有限检查，以及 2026-11-23 的客户端验收复测，都写在测试说明里。复测确认 FlClash 0.9.4 可以文件导入官方 `mihomo-profile`。同一天，Shadowrocket 可以导入与 v2rayN 粘贴相同的剪贴板 `vless://` URI，也可以扫码导入离线 VLESS 二维码；这次对 Shadowrocket 只记录导入成功。这些记录不延伸到全部 Mihomo/Xray 组合，也不把扫描 VLESS 二维码当成携带 Mihomo YAML ML-KEM 字段的方式。2026-11-21 没有把官方文件的隔离 HTTPS 重写成新的状态码与出口矩阵。
 
 ### sing-box
 
@@ -116,7 +116,7 @@ Mihomo 的 TLS/REALITY 文档写明不考虑与 xray-core v26.7.11 及更新版�
 
 `curve_preferences` 是 sing-box 1.13.0 加入的 Go TLS 选项，允许的取值包含 `X25519MLKEM768`，文档写明列表顺序会被忽略。sing-box 的 REALITY 走 uTLS，因此这里不写 `curve_preferences`，也不把 Mihomo 的 `support-x25519mlkem768` 抄进 JSON。1.14.4 的 `common/tls/reality_client.go` 会从 REALITY ClientHello 中去掉 `X25519MLKEM768`。`testing` 分支提交 `39501357a5`（2026-11-14，说明为 “Stop removing X25519MLKEM768 from reality ClientHello”）改为保留指纹自带的 key share，没有新增 JSON 字段。该提交不在 1.14.4，也不在 1.15.0-alpha.13（2026-10-24）。
 
-文件不写入站，所以不会打开本地代理端口。不写 TUN 和 DNS，也不写 `insecure`。服务器上的 `minClientVer` 保持原样。2026-11-23 用官方 sing-box 1.14.4 对三份合成文件执行 `sing-box check -c`：带 vision flow 和 short ID、空 short ID 且没有 flow、以及 IPv6 服务器，均被接受。同一二进制把抄进去的 `support-x25519mlkem768` 判为未知字段，并在去掉 `utls` 后拒绝该 REALITY 出站。这次检查只加载 JSON，不建立连接，也不能说明官方 sing-box 1.14.4 已经和 Xray 26.11.9 完成 REALITY。没有做握手或 HTTPS 请求。selector 目前只能通过 Clash API 切换；只有一个出站时，`default` 已经选中它。
+文件不写入站，所以不会打开本地代理端口。不写 TUN 和 DNS，也不写 `insecure`。服务器上的 `minClientVer` 保持原样。2026-11-23 用官方 sing-box 1.14.4 对三份合成文件执行 `sing-box check -c`：带 vision flow 和 short ID、空 short ID 且没有 flow、以及 IPv6 服务器，均被接受。同一二进制把抄进去的 `support-x25519mlkem768` 判为未知字段，并在去掉 `utls` 后拒绝该 REALITY 出站。这次合成文件检查只加载 JSON，不建立连接。同一天的验收复测使用官方导出 JSON：`sing-box check -c` 通过，但对 Xray 26.11.9 的 REALITY 握手失败，错误为 `reality verification failed`。原因是官方 1.14.4 从 REALITY ClientHello 去掉 `X25519MLKEM768`。同一路径上，Mihomo 1.19.33 使用官方字段 `reality-opts.support-x25519mlkem768: true` 时成功。不要把削弱服务器 REALITY、修改 `minClientVer` 或向 JSON 添加非官方字段当作解决办法。selector 目前只能通过 Clash API 切换；只有一个出站时，`default` 已经选中它。
 
 ## 🧪 测试
 
@@ -128,7 +128,7 @@ npm run test:unit
 npm run test:safety
 ```
 
-`npm run check` 汇总文件白名单、路径与敏感模式检查及本候选选取的核心、导出器、SSH、CLI 及 smoke 检查，不等于原完整应用测试集。Ubuntu 24.04 / Debian 13 的公网 HTTPS 实机验收另有记录。测试说明包含 2026-11-21 的客户端检查及其边界。本地 mock 测试通过不等于新环境一定部署成功。
+`npm run check` 汇总文件白名单、路径与敏感模式检查及本候选选取的核心、导出器、SSH、CLI 及 smoke 检查，不等于原完整应用测试集。Ubuntu 24.04 / Debian 13 的公网 HTTPS 实机验收另有记录。测试说明包含 2026-11-21 的客户端检查、2026-11-23 的客户端验收复测及其边界。本地 mock 测试通过不等于新环境一定部署成功。
 
 测试依据与限制见 [测试说明](docs/TESTING.zh-CN.md)。
 
