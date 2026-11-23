@@ -10,7 +10,7 @@ export const help = `vpncp — 通过 OpenSSH 接管现有 Xray
   vpncp setup <node> [--ssh <Host>] [--plan | --apply] [--port 8443] [--json]
   vpncp status <node> [--ssh <Host>] [--json]
   vpncp endpoint <node> --host <new-host> [--json]
-  vpncp export <node> --to v2rayn|vless-qr|mihomo-provider|mihomo-profile [--client <ref>] [--out <path>] [--json]
+  vpncp export <node> --to v2rayn|vless-qr|mihomo-provider|mihomo-profile|sing-box [--client <ref>] [--out <path>] [--json]
 
 默认 SSH Host 与 node 同名；接管后复用已保存的 Host。
 setup 接管已有实例；干净 Debian 13 / Ubuntu 24.04 LTS 可安装固定 Xray 26.11.9。
@@ -23,11 +23,14 @@ setup 接管已有实例；干净 Debian 13 / Ubuntu 24.04 LTS 可安装固定 X
 REALITY 默认 www.cloudflare.com:443，执行前验证 TLS1.3 与证书，失败则停止。
 endpoint 仅显式更新已接管节点的连接地址；使用原地址的可信 SSH 主机密钥，要求配置及运行状态一致。
 更新后 export --out <新文件路径>，保留旧导出；不改 SSH 配置和历史安装日志。
-export 写入私有文件，不在终端显示 URI、YAML、UUID、公钥或 shortId。
+export 写入私有文件，不在终端显示 URI、YAML、JSON、UUID、公钥或 shortId。
 --to v2rayn 写 VLESS URI（.vless.txt）。--to vless-qr 离线生成同一条 URI 的 PNG 二维码（.vless.png）。
 --to mihomo-provider 只写 proxies 列表。--to mihomo-profile 写最小配置：一个节点、一个 select 组、一条 MATCH；不开启 TUN，不改系统 DNS。
 mihomo YAML 的 reality-opts 写入 support-x25519mlkem768；已在 Mihomo 1.19.33/1.19.34 对接 Xray 26.11.9 REALITY 的实测中验证为必需，不保证所有客户端组合。
-默认 chrome 指纹。服务器 network 为 raw 时仍导出 tcp。不声明 UDP，不写 packet-encoding。
+--to sing-box 写官方 sing-box JSON（.sing-box.json）：一个 VLESS 出站、一个 selector、route.final 指向该 selector。不写入站，不开启 TUN，不改 DNS。
+sing-box 的 reality 只写官方字段 enabled、public_key、short_id，并启用 utls 指纹 chrome。network 为 tcp。packet_encoding 写空字符串，因为 sing-box 1.14.4 省略该字段时会启用 xudp。
+sing-box 没有与 support-x25519mlkem768 对应的官方字段，也不写 curve_preferences。官方稳定版 1.14.4 在 REALITY 客户端代码里去掉 X25519MLKEM768；这不是配置项。未做 sing-box 握手验证。
+默认 chrome 指纹。服务器 network 为 raw 时仍导出 tcp。Mihomo 不写 udp 与 packet-encoding。
 多客户端时通过 status 返回的 ref 选择。防火墙与 SSH 配置不会自动调整。
 退出码 0 完成，2 参数或不支持，3 基线/目标冲突，4 连接或本地 I/O 失败。
 `;

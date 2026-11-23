@@ -1,7 +1,7 @@
 import { createShadowrocketLink } from "./shadowrocket-real.ts";
 
 /**
- * Fields shared by the v2rayN URI and Mihomo YAML exporters.
+ * Fields shared by the v2rayN URI, Mihomo YAML and sing-box JSON exporters.
  * Built only after the same VLESS/REALITY checks used by exportCandidates
  * and createShadowrocketLink. Renderers must not read the Xray document again.
  */
@@ -22,7 +22,7 @@ export type ClientConnectionSpec = {
   protocol: "vless";
 };
 
-export const exportFormats = ["v2rayn", "vless-qr", "mihomo-provider", "mihomo-profile"] as const;
+export const exportFormats = ["v2rayn", "vless-qr", "mihomo-provider", "mihomo-profile", "sing-box"] as const;
 export type ExportFormat = (typeof exportFormats)[number];
 
 export type ValidatedExportFields = {
@@ -37,7 +37,7 @@ export type ValidatedExportFields = {
 export type ExportFieldFailure = { ok: false; code: string };
 
 export function isExportFormat(value: string | undefined): value is ExportFormat {
-  return value === "v2rayn" || value === "vless-qr" || value === "mihomo-provider" || value === "mihomo-profile";
+  return value !== undefined && (exportFormats as readonly string[]).includes(value);
 }
 
 export function validateClientExportFields(input: {
@@ -115,6 +115,7 @@ export function defaultExportFileName(clientRef: string, format: ExportFormat): 
   if (format === "mihomo-provider") return `${clientRef}.mihomo-provider.yaml`;
   if (format === "mihomo-profile") return `${clientRef}.mihomo-profile.yaml`;
   if (format === "vless-qr") return `${clientRef}.vless.png`;
+  if (format === "sing-box") return `${clientRef}.sing-box.json`;
   return `${clientRef}.vless.txt`;
 }
 

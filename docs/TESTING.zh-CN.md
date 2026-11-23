@@ -32,7 +32,7 @@ npm run test:safety
 
 ## Mihomo YAML 导出
 
-`vpncp export --to v2rayn|vless-qr|mihomo-provider|mihomo-profile` 在本地 mock 中覆盖字段映射、IPv6、空 shortId、代理名与组名不冲突、未知 `--to`（含笼统的 `clash`）拒绝、内容不同则 `OUTPUT_EXISTS`、以及 JSON/人类可读输出不包含 URI、UUID、公钥或 shortId。`v2rayn` 仍写 `.vless.txt`；`vless-qr` 写 `.vless.png`，单元测试用合成 fixture 解码二维码并与 URI 逐字节比对。Mihomo YAML 的 `reality-opts` 断言包含 `support-x25519mlkem768: true`。provider 只有 `proxies:`；profile 只有一个节点、一个 select 组和一条 `MATCH`，不写 TUN、DNS、`udp` 或 `packet-encoding`。
+`vpncp export --to v2rayn|vless-qr|mihomo-provider|mihomo-profile|sing-box` 在本地 mock 中覆盖字段映射、IPv6、空 shortId、代理名与组名不冲突、未知 `--to`（含笼统的 `clash`）拒绝、内容不同则 `OUTPUT_EXISTS`、以及 JSON/人类可读输出不包含 URI、UUID、公钥或 shortId。`v2rayn` 仍写 `.vless.txt`；`vless-qr` 写 `.vless.png`，单元测试用合成 fixture 解码二维码并与 URI 逐字节比对。Mihomo YAML 的 `reality-opts` 断言包含 `support-x25519mlkem768: true`。provider 只有 `proxies:`；profile 只有一个节点、一个 select 组和一条 `MATCH`，不写 TUN、DNS、`udp` 或 `packet-encoding`。`sing-box` 写 `.sing-box.json`，断言见下一节。
 
 这些检查不连接 SSH，也不与 FlClash 或 Mihomo 握手。Windows ACL 用例在 `process.platform !== 'win32'` 时直接返回，TAP 仍会计为通过；只在 Linux 上跑完测试，不能写成已经执行 Windows ACL。POSIX 文件 0600、目录 0700 只在实际执行该断言的系统上成立。
 
@@ -43,6 +43,22 @@ npm run test:safety
 Linux、Node.js v22.23.4 上执行 `npm ci --ignore-scripts --no-audit --no-fund` 和 `npm run check`：类型检查通过；单元 16、安全 5、SSH 信任 2、CLI 39 全部通过，0 失败。smoke 与候选文件扫描（45 个文件）通过。没有连接 SSH，没有做 FlClash 或 Mihomo 握手。
 
 同一次 CLI 测试中，Windows ACL 用例因平台不是 win32 立即返回，TAP 仍把它计为通过。这次没有执行 Windows ACL。文件 0600 与目录 0700 的断言在这次 Linux 运行里执行并通过。
+
+## sing-box JSON 导出
+
+`--to sing-box` 生成一份可本地导入的官方 sing-box JSON：一个 `vless` 出站、一个 `selector`、`route.final` 指向该 selector。标签与 Mihomo 相同，为 `rq-<节点 id>-<客户端 ref>` 和带 `-select` 的 selector。不写入站、TUN、DNS 或 `insecure`。终端和 `--json` 只给出路径与格式名。
+
+目标版本是官方稳定版 **sing-box 1.14.4**（2026-10-24 发布；截至 2026-11-23，GitHub Releases 上没有更新的稳定版）。字段对照该标签的 `VLESSOutboundOptions`、`OutboundTLSOptions`、`OutboundUTLSOptions`、`OutboundRealityOptions`，以及当时的在线文档 [VLESS](https://sing-box.sagernet.org/configuration/outbound/vless/) 与 [TLS](https://sing-box.sagernet.org/configuration/shared/tls/)。`testing` 分支在 2026-11-19 的 REALITY 客户端结构体仍然只有 `enabled`、`public_key`、`short_id`。
+
+写入的出站字段：`server`、`server_port`、`uuid`、仅当 flow 为 `xtls-rprx-vision` 时的 `flow`、`network: "tcp"`、`packet_encoding: ""`、`tls.enabled`、`tls.server_name`、`tls.utls.enabled: true`、`tls.utls.fingerprint: "chrome"`、`tls.reality.enabled`、`tls.reality.public_key`、`tls.reality.short_id`。空 shortId 写成 `""`。IPv6 不加方括号。uTLS 是 1.14.4 `common/tls/reality_client.go` 的启动条件（未启用时返回 `uTLS is required by reality client`）。`packet_encoding` 使用空字符串，因为同一版本的 `protocol/vless/outbound.go` 在字段缺失时把编码设为 xudp；`network` 为 `tcp` 时不启用 UDP。
+
+官方 schema 里没有 Mihomo 的 `support-x25519mlkem768`。`curve_preferences` 自 1.13.0 起包含 `X25519MLKEM768`，但是 Go TLS 的密钥交换列表，文档写明顺序会被忽略；REALITY 走 uTLS，导出文件不写这个字段。1.14.4 在 REALITY 客户端代码中从 ClientHello 去掉 `X25519MLKEM768`。`testing` 提交 `39501357a5`（2026-11-14）停止去掉该 key share，且没有新增 JSON 字段；它不在 1.14.4 或 1.15.0-alpha.13（2026-10-24）里。因此当前没有一个官方配置项可以单独打开或关闭这一行为。
+
+本地 mock 覆盖上述字段、权限 0600/0700、内容不同则 `OUTPUT_EXISTS`、以及输出不含 URI、UUID、公钥或 shortId。这些检查不连接 SSH，也不与 sing-box 或 Xray 握手。导入方式是保存该 JSON 后在本机执行 `sing-box check -c <文件>` 或由客户端从本地文件导入；`sing-box run -c <文件>` 不会因为这份文件打开监听端口。
+
+**2026-11-23 本地 `sing-box check`。** 官方发布包 sing-box 1.14.4（linux/amd64，revision `c005f35300ce76427dc285481ec5695f5b179cd2`）对三份合成 JSON 执行 `sing-box check -c`：带 `xtls-rprx-vision` 与 short ID、空 short ID 且省略 `flow`、IPv6 服务器。三份都退出 0。同一二进制把抄入的 `support-x25519mlkem768` 报为 unknown field，并在去掉 `utls` 时返回 `uTLS is required by reality client`。公钥是本机临时生成的 X25519 公钥，配置留在临时目录，不进入仓库。这次检查没有连接网络。
+
+**尚未验证：** 没有在 Xray 26.11.9 上用任何 sing-box 版本完成 REALITY 握手或 HTTPS。不能把上游 issue 或第三方记录写成 RouteQuay 的实机验收。官方 1.14.4 能否与当前服务器完成 REALITY，需要使用者自行确认。图形客户端的导入界面也没有在本次检查中操作。`check` 通过只说明这份 JSON 能被 1.14.4 加载。
 
 ## 2026-11-21 客户端有限验收（Asia/Shanghai，UTC+8）
 
@@ -74,6 +90,7 @@ Linux、Node.js v22.23.4 上执行 `npm ci --ignore-scripts --no-audit --no-fund
 - 不代表实验性的 Web 管理功能达到可发布质量。
 - 本地模拟通过不等于远端实机测试重新执行。
 - 2026-11-21 客户端记录的未覆盖项仍然成立，包括未重跑的官方文件隔离 HTTPS、未用官方文件重导入的 FlClash，以及未测的 Mihomo/Xray 版本组合。
+- sing-box JSON 的字段检查不能推出它已经和 Xray 26.11.9 完成 REALITY。官方 1.14.4 会在客户端代码里去掉 `X25519MLKEM768`，而停止去掉该 key share 的改动当时只在未发布的 `testing` 提交里。
 
 ## 测试安全
 

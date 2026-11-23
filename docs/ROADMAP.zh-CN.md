@@ -6,7 +6,7 @@ RouteQuay 的目标是减少个人服务器连接与管理中的不必要步骤�
 
 | 阶段 | 方向 | 当前判断 |
 |---|---|---|
-| Core-first 候选 | Xray CLI 部署、接管、状态检查；VLESS/REALITY 导出为 v2rayN URI 或 Mihomo YAML 文件 | 部署与 v2rayN URI 有实机证据。2026-11-21 在 Ubuntu 24.04 与 Debian 13、Xray 26.11.9 上有 Mihomo 1.19.33 与 FlClash 0.9.4 的有限记录，边界见测试说明，不覆盖全部版本。独立候选本地验证通过，待维护者发布审阅 |
+| Core-first 候选 | Xray CLI 部署、接管、状态检查；VLESS/REALITY 导出为 v2rayN URI、Mihomo YAML 或 sing-box JSON 文件 | 部署与 v2rayN URI 有实机证据。2026-11-21 在 Ubuntu 24.04 与 Debian 13、Xray 26.11.9 上有 Mihomo 1.19.33 与 FlClash 0.9.4 的有限记录，边界见测试说明，不覆盖全部版本。sing-box JSON 按官方 1.14.4 字段在本地生成，官方二进制对合成文件的 `check` 已通过，握手尚未验证。独立候选本地验证通过，待维护者发布审阅 |
 | 首次公开 | 安全隔离、双语 README、可复制安装步骤、许可证及必要测试 | 准备中 |
 | 后续维护 | 实际问题反馈、兼容性修复、可维护的文档 | 按需进行 |
 | 实验性工作 | 已探索的 Web 管理界面、节点/用户/部署相关页面 | 不属于首发稳定范围 |

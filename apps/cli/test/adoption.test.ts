@@ -39,6 +39,7 @@ test('default parameters, explicit overrides, unknown and duplicate flags', () =
   assert.equal(parseArguments(['export', 'node-a', '--to', 'mihomo-provider']).to, 'mihomo-provider');
   assert.equal(parseArguments(['export', 'node-a', '--to', 'mihomo-profile']).to, 'mihomo-profile');
   assert.equal(parseArguments(['export', 'node-a', '--to', 'vless-qr']).to, 'vless-qr');
+  assert.equal(parseArguments(['export', 'node-a', '--to', 'sing-box']).to, 'sing-box');
   rejects(() => parseArguments(['export', 'node-a', '--to', 'clash']), 'EXPORT_FORMAT_UNSUPPORTED');
   rejects(() => parseArguments(['export', 'node-a', '--to', 'bad']), 'EXPORT_FORMAT_UNSUPPORTED');
   rejects(() => parseArguments(['status', 'a', '--plan']), 'UNKNOWN_OPTION');
@@ -379,8 +380,10 @@ test('mihomo YAML keeps tcp, empty shortId and omits flow; other decryption is n
   const output = join(blocked.root, 'blocked.yaml');
   rejects(() => runAdoption({ command: 'export', nodeId: 'a', to: 'mihomo-provider', out: output }, blocked.root, blocked.transport), 'DECRYPTION_UNSUPPORTED');
   rejects(() => runAdoption({ command: 'export', nodeId: 'a', to: 'v2rayn', out: join(blocked.root, 'blocked.txt') }, blocked.root, blocked.transport), 'DECRYPTION_UNSUPPORTED');
+  rejects(() => runAdoption({ command: 'export', nodeId: 'a', to: 'sing-box', out: join(blocked.root, 'blocked.json') }, blocked.root, blocked.transport), 'DECRYPTION_UNSUPPORTED');
   assert.equal(existsSync(output), false);
   assert.equal(existsSync(join(blocked.root, 'blocked.txt')), false);
+  assert.equal(existsSync(join(blocked.root, 'blocked.json')), false);
 });
 test('vless-qr writes a protected PNG without echoing the URI in terminal output', () => {
   const f = fixture();
@@ -404,13 +407,73 @@ test('vless-qr writes a protected PNG without echoing the URI in terminal output
   writeFileSync(qr.outputFile as string, Buffer.concat([bytes, Buffer.from([0])]));
   rejects(() => runAdoption({ command: 'export', nodeId: 'a', to: 'vless-qr' }, f.root, f.transport), 'OUTPUT_EXISTS');
 });
+test('sing-box profile writes a protected JSON file and does not echo secrets', () => {
+  const f = fixture();
+  runAdoption({ command: 'setup', nodeId: 'a' }, f.root, f.transport);
+  const result = runAdoption({ command: 'export', nodeId: 'a', to: 'sing-box' }, f.root, f.transport);
+  assert.match(String(result.outputFile), /\.sing-box\.json$/);
+  assert.equal(result.format, 'sing-box');
+  const text = readFileSync(result.outputFile as string, 'utf8');
+  const profile = JSON.parse(text);
+  assert.equal(profile.outbounds[0].type, 'vless');
+  assert.equal(profile.outbounds[0].network, 'tcp');
+  assert.equal(profile.outbounds[0].packet_encoding, '');
+  assert.equal(profile.outbounds[0].tls.utls.fingerprint, 'chrome');
+  assert.equal(profile.outbounds[0].tls.reality.enabled, true);
+  assert.equal(profile.outbounds[1].type, 'selector');
+  assert.equal(profile.route.final, profile.outbounds[1].tag);
+  assert.equal(profile.outbounds[0].tag, 'rq-a-inbound-1-client-1');
+  assert.equal(profile.outbounds[1].tag, 'rq-a-inbound-1-client-1-select');
+  assert.equal(text.includes('vless://'), false);
+  assert.equal(text.includes('support-x25519mlkem768'), false);
+  assert.equal(text.includes('curve_preferences'), false);
+  assert.equal(text.includes('"inbounds"'), false);
+  assert.equal(Object.hasOwn(profile, 'dns'), false);
+  const publicKey = keys.publicKey.export({ format: 'der', type: 'spki' }).subarray(-32).toString('base64url');
+  const json = JSON.stringify(result);
+  const human = renderHumanResult(result);
+  for (const secret of [uuid, privateKey, publicKey, 'abcdef12', 'vless://', 'public_key', 'outbounds']) {
+    assert.equal(json.includes(secret), false, secret);
+    assert.equal(human.includes(secret), false, secret);
+  }
+  assert.equal(human.includes(String(result.outputFile)), true);
+  if (process.platform !== 'win32') {
+    assert.equal(statSync(result.outputFile as string).mode & 0o777, 0o600);
+    assert.equal(statSync(join(f.root, 'local/private/cli-nodes/a')).mode & 0o777, 0o700);
+  }
+  const original = text;
+  writeFileSync(result.outputFile as string, `${original}\n`);
+  rejects(() => runAdoption({ command: 'export', nodeId: 'a', to: 'sing-box' }, f.root, f.transport), 'OUTPUT_EXISTS');
+  assert.equal(readFileSync(result.outputFile as string, 'utf8'), `${original}\n`);
+  writeFileSync(result.outputFile as string, original);
+  assert.equal(runAdoption({ command: 'export', nodeId: 'a', to: 'sing-box' }, f.root, f.transport).status, 'unchanged');
+  assert.equal(readFileSync(result.outputFile as string, 'utf8'), original);
+});
+test('sing-box JSON keeps tcp, empty shortId and omits flow', () => {
+  const f = fixture();
+  f.probe.config.inbounds[0].settings.clients.push({ id: '22222222-2222-4222-8222-222222222222' });
+  f.probe.config.inbounds[0].streamSettings.realitySettings.shortIds = [''];
+  f.probe.config.inbounds[0].settings.decryption = 'none';
+  runAdoption({ command: 'setup', nodeId: 'a' }, f.root, f.transport);
+  const result = runAdoption({ command: 'export', nodeId: 'a', client: 'inbound-1-client-2', to: 'sing-box' }, f.root, f.transport);
+  const profile = JSON.parse(readFileSync(result.outputFile as string, 'utf8'));
+  assert.equal(profile.outbounds[0].network, 'tcp');
+  assert.equal(profile.outbounds[0].tls.reality.short_id, '');
+  assert.equal(Object.hasOwn(profile.outbounds[0], 'flow'), false);
+  assert.equal(profile.outbounds[0].tag, 'rq-a-inbound-1-client-2');
+  assert.equal(profile.outbounds[1].tag, 'rq-a-inbound-1-client-2-select');
+  assert.equal(profile.route.final, 'rq-a-inbound-1-client-2-select');
+});
 test('IPv6 export host is bracketed in the URI and quoted in YAML', () => {
   const f = fixture();
   f.transport.resolve = alias => ({ alias, host: '2001:db8::10', user: 'root', port: 25281 });
   runAdoption({ command: 'setup', nodeId: 'a' }, f.root, f.transport);
   const uri = runAdoption({ command: 'export', nodeId: 'a', to: 'v2rayn' }, f.root, f.transport);
   const yaml = runAdoption({ command: 'export', nodeId: 'a', to: 'mihomo-provider' }, f.root, f.transport);
+  const singBox = runAdoption({ command: 'export', nodeId: 'a', to: 'sing-box' }, f.root, f.transport);
   assert.match(readFileSync(uri.outputFile as string, 'utf8'), /@\[2001:db8::10\]:8443\?/);
   assert.match(readFileSync(yaml.outputFile as string, 'utf8'), /server: "2001:db8::10"/);
+  assert.equal(JSON.parse(readFileSync(singBox.outputFile as string, 'utf8')).outbounds[0].server, '2001:db8::10');
   assert.equal(JSON.stringify(yaml).includes('2001:db8::10'), false);
+  assert.equal(JSON.stringify(singBox).includes('2001:db8::10'), false);
 });

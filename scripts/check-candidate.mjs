@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 const manifest=JSON.parse(fs.readFileSync('docs/SOURCE-SNAPSHOT.json','utf8'));
-const allowed=new Set(['LICENSE',...manifest.files.map(x=>x.path),...[".gitignore",".gitattributes",".editorconfig","AGENTS.md","package.json","package-lock.json","tsconfig.json","README.md","README.zh-CN.md","docs/TESTING.zh-CN.md","docs/ROADMAP.zh-CN.md","docs/DEVELOPMENT.md","docs/LICENSE-REVIEW.md","docs/SOURCE-SNAPSHOT.json","packages/core/test/ssh-trust.test.ts","packages/exporters/src/client-connection.ts","packages/exporters/src/mihomo-yaml.ts","packages/exporters/src/vless-qr.ts","packages/exporters/test/mihomo-export.test.ts","packages/exporters/test/vless-qr.test.ts","scripts/cli-smoke.mjs","scripts/check-candidate.mjs"]]);
+const allowed=new Set(['LICENSE',...manifest.files.map(x=>x.path),...[".gitignore",".gitattributes",".editorconfig","AGENTS.md","package.json","package-lock.json","tsconfig.json","README.md","README.zh-CN.md","docs/TESTING.zh-CN.md","docs/ROADMAP.zh-CN.md","docs/DEVELOPMENT.md","docs/LICENSE-REVIEW.md","docs/SOURCE-SNAPSHOT.json","packages/core/test/ssh-trust.test.ts","packages/exporters/src/client-connection.ts","packages/exporters/src/mihomo-yaml.ts","packages/exporters/src/vless-qr.ts","packages/exporters/src/sing-box-json.ts","packages/exporters/test/mihomo-export.test.ts","packages/exporters/test/vless-qr.test.ts","packages/exporters/test/sing-box-export.test.ts","scripts/cli-smoke.mjs","scripts/check-candidate.mjs"]]);
 const excluded=new Set(['.git','.ai','node_modules','backups','local','exports','logs','secrets','.npm-cache']);
 const files=[];
 function visit(dir='.') {for(const entry of fs.readdirSync(dir,{withFileTypes:true})){

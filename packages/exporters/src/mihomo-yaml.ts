@@ -5,6 +5,7 @@ import {
   type ClientConnectionSpec,
   type ExportFormat
 } from "./client-connection.ts";
+import { renderSingBoxProfile } from "./sing-box-json.ts";
 
 function quoteYaml(value: string): string {
   return `"${value
@@ -76,5 +77,6 @@ export function renderClientExport(format: ExportFormat, spec: ClientConnectionS
   if (format === "v2rayn") return `${renderVlessRealityUri(spec)}\n`;
   if (format === "mihomo-provider") return renderMihomoProvider(spec);
   if (format === "mihomo-profile") return renderMihomoProfile(spec);
+  if (format === "sing-box") return renderSingBoxProfile(spec);
   throw new Error("EXPORT_FORMAT_UNSUPPORTED");
 }

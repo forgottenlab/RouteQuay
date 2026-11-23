@@ -26,6 +26,7 @@ Several mature networking and Xray management projects already exist. RouteQuay 
 | Export a VLESS/REALITY client link for v2rayN | Verified end-to-end |
 | Export a local VLESS QR PNG (`vless-qr`) | Offline decode in unit tests; 2026-11-21 v2rayN GUI image import succeeded on the two recorded nodes |
 | Export Mihomo YAML (`mihomo-provider` or `mihomo-profile`) | 2026-11-21 limited record: on Ubuntu 24.04 and Debian 13 with Xray 26.11.9, Mihomo 1.19.33 required unquoted `support-x25519mlkem768: true`; FlClash 0.9.4 imported those profiles. Not every version pair |
+| Export a local sing-box JSON profile (`sing-box`) | Official sing-box 1.14.4 `check` accepted synthetic files on 2026-11-23. Handshake with Xray 26.11.9 was not run |
 | Explicitly update a server endpoint while preserving SSH host identity | Implemented and tested |
 | SSH identity checks, transaction recovery, local state protection | Implemented; see limitations |
 | Web management UI and broader network management | Experimental; **not part of the first stable scope** |
@@ -67,6 +68,9 @@ Run commands from the project checkout using PowerShell. `example-node` is an SS
 # Mihomo / Clash Meta: a proxies list, or a minimal profile file.
 .\vpncp.cmd export example-node --to mihomo-provider
 .\vpncp.cmd export example-node --to mihomo-profile
+
+# sing-box: one local JSON file. Import that file; there is no subscription URL.
+.\vpncp.cmd export example-node --to sing-box
 ```
 
 After reviewing a clean-host plan, `vpncp setup example-node --apply` explicitly approves installation. An existing host may instead be adopted. Read the planned operation and backup/restore information before approving changes.
@@ -82,7 +86,7 @@ This does **not** authorize a new SSH server identity. Strict host-key validatio
 
 ## Client export
 
-`vpncp export <node> --to <format>` writes a private file and prints the path only. It does not print the URI, YAML, UUID, REALITY public key, or short ID. `--out` chooses another path. The same bytes are left in place; different bytes are refused with `OUTPUT_EXISTS`.
+`vpncp export <node> --to <format>` writes a private file and prints the path only. It does not print the URI, YAML, JSON, UUID, REALITY public key, or short ID. `--out` chooses another path. The same bytes are left in place; different bytes are refused with `OUTPUT_EXISTS`.
 
 | `--to` | Default file | When to use it |
 |---|---|---|
@@ -90,12 +94,29 @@ This does **not** authorize a new SSH server identity. Strict host-key validatio
 | `vless-qr` | `<ref>.vless.png` | Offline PNG QR for the same VLESS URI as `v2rayn`. No network API; scan import does not add Mihomo YAML fields. |
 | `mihomo-provider` | `<ref>.mihomo-provider.yaml` | A Mihomo / Clash Meta profile already exists. The file is only a `proxies:` list, not a URI or base64 document. |
 | `mihomo-profile` | `<ref>.mihomo-profile.yaml` | FlClash or Mihomo needs a first file: one proxy, one `select` group, and a final `MATCH` rule. |
+| `sing-box` | `<ref>.sing-box.json` | A local sing-box configuration: one VLESS outbound, one `selector`, and `route.final`. No inbound, TUN, or DNS. |
 
 Proxy and group names are `rq-<nodeId>-<clientRef>` and `rq-<nodeId>-<clientRef>-select`, so they do not collide in one file. Server `network: raw` is exported as `tcp`, matching the URI. `flow` is written only for `xtls-rprx-vision`. `encryption: none` is written only when the inbound decryption is omitted or `none`, which is also the URI's `encryption=none`. Mihomo treats that value as no extra VLESS encryption. `reality-opts` also sets `support-x25519mlkem768: true` (boolean, unquoted) for Xray 26.11.9 ML-KEM. In the 2026-11-21 record, isolated Mihomo 1.19.33 on both tested VPS hosts required this field before REALITY HTTPS succeeded. FlClash 0.9.4 (embedded Mihomo 1.19.34) imported profiles that already contained the field. Not every Mihomo/Xray pairing is guaranteed. `udp` and `packet-encoding` are omitted: the installer does not set packet encoding, and omitted `udp` is Mihomo's false default. The profile does not enable TUN, does not change system DNS, and is not a full routing ruleset.
 
 FlClash 0.9.0 and later can parse share links, including `vless://`. Its core calls Mihomo `ConvertsV2Ray`, and upstream has a VLESS REALITY round-trip test. Parsing a link is not a completed handshake with RouteQuay's pinned Xray 26.11.9, and a link has no groups or rules. YAML is the recommended FlClash path for that reason.
 
 Mihomo's TLS/REALITY documentation says it will not consider compatibility with xray-core v26.7.11 or newer. RouteQuay installs only 26.11.9 and does not set `minClientVer`. In that Xray version the default `minClientVer=26.3.27` assignment is commented out, and the bundled REALITY library skips the version check when `MinClientVer` is nil. This export does not change `minClientVer` and does not weaken REALITY. A limited check on 2026-11-21 (Asia/Shanghai) is recorded in the testing notes for Mihomo 1.19.33 and FlClash 0.9.4 on the two tested VPS hosts. That record does not extend to every Mihomo/Xray pair, does not repeat an isolated HTTPS run of the official files after merge, and does not treat a scanned VLESS QR as a carrier of the Mihomo YAML ML-KEM field.
+
+### sing-box
+
+`--to sing-box` writes `<ref>.sing-box.json`. Import that file locally: `sing-box check -c <file>`, `sing-box run -c <file>`, or a client's import-from-file action. The command prints the path only. There is no hosted subscription URL.
+
+The schema is the official outbound VLESS and TLS documents ([VLESS](https://sing-box.sagernet.org/configuration/outbound/vless/), [TLS](https://sing-box.sagernet.org/configuration/shared/tls/)) as implemented by sing-box **1.14.4** (published 2026-10-24, the newest stable release as of 2026-11-23). The same three REALITY client fields are still the whole `OutboundRealityOptions` struct on the `testing` branch as of 2026-11-19. The file contains:
+
+- one `vless` outbound tagged `rq-<nodeId>-<clientRef>`
+- one `selector` tagged `rq-<nodeId>-<clientRef>-select`, with that outbound as its only choice and its `default`
+- `route.final` set to the selector
+
+`server` and `server_port` come from the saved endpoint and inbound port. An IPv6 server is a plain address string, without brackets. `uuid` is the client id. `flow` is written only for `xtls-rprx-vision`. `network` is `tcp` when the inbound network is `tcp` or `raw`. `packet_encoding` is `""` because sing-box 1.14.4 treats a missing value as `xudp` (`protocol/vless/outbound.go`). `tls.enabled` is true. `tls.server_name` is the single REALITY server name. `tls.utls.enabled` is true and `tls.utls.fingerprint` is `chrome`, because the 1.14.4 REALITY client refuses to start unless uTLS is enabled. `tls.reality` is `enabled`, `public_key`, and `short_id` only. An empty short ID stays `""`.
+
+`curve_preferences` is a Go TLS option added in sing-box 1.13.0. Its allowed values include `X25519MLKEM768`, and the documented order is ignored. REALITY in sing-box goes through uTLS, so this export does not write `curve_preferences` and does not copy Mihomo's `support-x25519mlkem768` into the JSON. In the 1.14.4 source, `common/tls/reality_client.go` removes `X25519MLKEM768` from the REALITY ClientHello. Commit `39501357a5` on `testing` (2026-11-14, “Stop removing X25519MLKEM768 from reality ClientHello”) keeps the fingerprint's key shares and adds no JSON field. That commit is not in the 1.14.4 release or in 1.15.0-alpha.13 (2026-10-24).
+
+No inbound is written, so the file does not open a local proxy port. TUN and DNS are omitted, and `insecure` is not set. `minClientVer` on the server is unchanged. On 2026-11-23 the official sing-box 1.14.4 binary accepted three synthetic files with `sing-box check -c`: vision flow with a short ID, an empty short ID and no flow, and an IPv6 server. The same binary rejected a copied `support-x25519mlkem768` field as an unknown field, and rejected a REALITY outbound after `utls` was removed. That check loads JSON only. It does not open a connection, and it does not show that official sing-box 1.14.4 completes REALITY with Xray 26.11.9. No handshake or HTTPS request was run. The selector can be changed through the Clash API; with one outbound, `default` already selects it.
 
 ## 🧪 Testing
 
