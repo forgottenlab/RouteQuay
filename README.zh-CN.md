@@ -26,6 +26,7 @@ RouteQuay 是轻量、快捷、安全的网络接入与服务器管理工具，�
 | 导出 v2rayN 可使用的 VLESS/REALITY 节点 | 已完成端到端验证 |
 | 导出本地 VLESS 二维码 PNG（`vless-qr`） | 离线单元测试已覆盖；2026-11-21 在两台已记录节点上，v2rayN 图形界面导入官方 PNG 成功 |
 | 导出 Mihomo YAML（`mihomo-provider` 或 `mihomo-profile`） | 2026-11-21 有限记录：Ubuntu 24.04 与 Debian 13、Xray 26.11.9 上，Mihomo 1.19.33 需要未加引号的 `support-x25519mlkem768: true`；FlClash 0.9.4 导入了这些 profile。不覆盖全部版本组合 |
+| 导出本地 sing-box JSON（`sing-box`） | 2026-11-23 官方 sing-box 1.14.4 的 `check` 接受了合成文件。尚未与 Xray 26.11.9 做握手 |
 | 显式更新公网地址并保留 SSH 主机身份 | 已实现并测试 |
 | SSH 身份保护、事务恢复和本地状态保护 | 已实现，存在明确使用边界 |
 | Web 可视化管理及更广泛的网络功能 | 实验阶段，**不属于首发稳定范围** |
@@ -67,6 +68,9 @@ npm run check
 # Mihomo / Clash Meta：已有配置用节点列表，首次导入用最小配置文件。
 .\vpncp.cmd export example-node --to mihomo-provider
 .\vpncp.cmd export example-node --to mihomo-profile
+
+# sing-box：一份本地 JSON。导入该文件，不提供订阅 URL。
+.\vpncp.cmd export example-node --to sing-box
 ```
 
 空机计划审核后使用 `vpncp setup example-node --apply` 显式确认安装；已有 Xray 实例可能进入接管流程。在应用任何更改前，应先确认计划、备份和恢复方式。
@@ -82,7 +86,7 @@ npm run check
 
 ## 客户端导出
 
-`vpncp export <node> --to <格式>` 只把文件写到私有目录，终端只打印路径，不打印 URI、YAML、UUID、REALITY 公钥或 shortId。`--out` 可指定其他路径。内容相同则保留原文件；内容不同则拒绝并返回 `OUTPUT_EXISTS`。
+`vpncp export <node> --to <格式>` 只把文件写到私有目录，终端只打印路径，不打印 URI、YAML、JSON、UUID、REALITY 公钥或 shortId。`--out` 可指定其他路径。内容相同则保留原文件；内容不同则拒绝并返回 `OUTPUT_EXISTS`。
 
 | `--to` | 默认文件 | 适用情况 |
 |---|---|---|
@@ -90,12 +94,29 @@ npm run check
 | `vless-qr` | `<ref>.vless.png` | 离线生成与 `v2rayn` 同一条 VLESS URI 的 PNG 二维码；不调网络 API。扫码导入不会自动带上 Mihomo YAML 字段。 |
 | `mihomo-provider` | `<ref>.mihomo-provider.yaml` | 已经有 Mihomo / Clash Meta 配置。文件只有 `proxies:` 列表，不含 URI 或 base64。 |
 | `mihomo-profile` | `<ref>.mihomo-profile.yaml` | FlClash 或 Mihomo 需要第一份文件：一个节点、一个 `select` 组、一条末尾 `MATCH` 规则。 |
+| `sing-box` | `<ref>.sing-box.json` | 本地 sing-box 配置：一个 VLESS 出站、一个 `selector`、`route.final` 指向该 selector。不写入站，不开启 TUN，不改 DNS。 |
 
 代理名是 `rq-<节点 id>-<客户端 ref>`，策略组名在其后加 `-select`，同一文件里不会重名。服务器 `network: raw` 导出为 `tcp`，与 URI 一致。只有客户端带 `xtls-rprx-vision` 时才写 `flow`。入站 `decryption` 省略或为 `none` 时才写 `encryption: none`，这也是 URI 里的 `encryption=none`；Mihomo 把这个值当作没有额外的 VLESS 加密。`reality-opts` 另写 `support-x25519mlkem768: true`（布尔、不引号），供 Xray 26.11.9 的 ML-KEM。2026-11-21 的记录里，两台已测 VPS 上的隔离 Mihomo 1.19.33 在 REALITY HTTPS 成功前需要该字段。FlClash 0.9.4（内嵌 Mihomo 1.19.34）导入的是已经带有该字段的 profile。不保证所有 Mihomo/Xray 组合。不写 `udp` 和 `packet-encoding`：安装器没有配置数据包编码，而 Mihomo 在省略 `udp` 时默认为 false。profile 不开启 TUN，不改系统 DNS，也不是一套完整路由规则。
 
 FlClash 0.9.0 及更新版本可以解析分享链接，包括 `vless://`。其核心调用 Mihomo 的 `ConvertsV2Ray`，上游有 VLESS REALITY 往返测试。链接解析成功不等于已经和 RouteQuay 固定的 Xray 26.11.9 完成握手，分享链接里也没有策略组或规则。因此仍建议 FlClash 使用 YAML。
 
 Mihomo 的 TLS/REALITY 文档写明不考虑与 xray-core v26.7.11 及更新版本的兼容。RouteQuay 只安装 26.11.9，并且不设置 `minClientVer`。该 Xray 版本里，默认的 `minClientVer=26.3.27` 赋值已被注释；捆绑的 REALITY 库在 `MinClientVer` 为 nil 时跳过版本检查。本次导出不会修改 `minClientVer`，也不会为了兼容而削弱 REALITY。2026-11-21（Asia/Shanghai）在两台已测 VPS 上对 Mihomo 1.19.33 与 FlClash 0.9.4 的有限检查写在测试说明里。该记录不延伸到全部 Mihomo/Xray 组合，不包括合并后对官方文件再跑一遍隔离 HTTPS，也不把扫描 VLESS 二维码当成携带 Mihomo YAML ML-KEM 字段的方式。
+
+### sing-box
+
+`--to sing-box` 写入 `<ref>.sing-box.json`。把这个文件当作本地配置导入：`sing-box check -c <文件>`、`sing-box run -c <文件>`，或图形客户端的“从本地文件导入”。命令只打印路径。没有托管订阅 URL。
+
+字段对齐官方出站文档（[VLESS](https://sing-box.sagernet.org/configuration/outbound/vless/)、[TLS](https://sing-box.sagernet.org/configuration/shared/tls/)），并对照 **sing-box 1.14.4**（2026-10-24 发布，截至 2026-11-23 的最新稳定版）源码里的 `VLESSOutboundOptions`、`OutboundTLSOptions`、`OutboundUTLSOptions`、`OutboundRealityOptions`。`testing` 分支截至 2026-11-19，REALITY 客户端仍然只有同样的三个字段。文件里有：
+
+- 一个标签为 `rq-<节点 id>-<客户端 ref>` 的 `vless` 出站
+- 一个标签为 `rq-<节点 id>-<客户端 ref>-select` 的 `selector`，唯一成员和 `default` 都是该出站
+- `route.final` 指向这个 selector
+
+`server` 与 `server_port` 来自已保存的端点和入站端口。IPv6 地址写成普通字符串，不加方括号。`uuid` 是客户端 id。只有 `xtls-rprx-vision` 才写 `flow`。入站 `network` 为 `tcp` 或 `raw` 时，导出的 `network` 为 `tcp`。`packet_encoding` 写空字符串，因为 sing-box 1.14.4 在省略该字段时会启用 `xudp`（`protocol/vless/outbound.go`）。`tls.enabled` 为 true。`tls.server_name` 是唯一的 REALITY server name。`tls.utls.enabled` 为 true，`tls.utls.fingerprint` 为 `chrome`：1.14.4 的 REALITY 客户端在未启用 uTLS 时会直接拒绝启动。`tls.reality` 只有 `enabled`、`public_key`、`short_id`。空 short ID 保持为 `""`。
+
+`curve_preferences` 是 sing-box 1.13.0 加入的 Go TLS 选项，允许的取值包含 `X25519MLKEM768`，文档写明列表顺序会被忽略。sing-box 的 REALITY 走 uTLS，因此这里不写 `curve_preferences`，也不把 Mihomo 的 `support-x25519mlkem768` 抄进 JSON。1.14.4 的 `common/tls/reality_client.go` 会从 REALITY ClientHello 中去掉 `X25519MLKEM768`。`testing` 分支提交 `39501357a5`（2026-11-14，说明为 “Stop removing X25519MLKEM768 from reality ClientHello”）改为保留指纹自带的 key share，没有新增 JSON 字段。该提交不在 1.14.4，也不在 1.15.0-alpha.13（2026-10-24）。
+
+文件不写入站，所以不会打开本地代理端口。不写 TUN 和 DNS，也不写 `insecure`。服务器上的 `minClientVer` 保持原样。2026-11-23 用官方 sing-box 1.14.4 对三份合成文件执行 `sing-box check -c`：带 vision flow 和 short ID、空 short ID 且没有 flow、以及 IPv6 服务器，均被接受。同一二进制把抄进去的 `support-x25519mlkem768` 判为未知字段，并在去掉 `utls` 后拒绝该 REALITY 出站。这次检查只加载 JSON，不建立连接，也不能说明官方 sing-box 1.14.4 已经和 Xray 26.11.9 完成 REALITY。没有做握手或 HTTPS 请求。selector 目前只能通过 Clash API 切换；只有一个出站时，`default` 已经选中它。
 
 ## 🧪 测试
 
