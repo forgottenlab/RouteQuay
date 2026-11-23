@@ -24,8 +24,8 @@ RouteQuay 是轻量、快捷、安全的网络接入与服务器管理工具，�
 | 接管现有 Xray 而不直接替换已有配置 | 已完成实机验证 |
 | 部署只读计划与节点状态查看 | 已实现并测试 |
 | 导出 v2rayN 可使用的 VLESS/REALITY 节点 | 已完成端到端验证 |
-| 导出本地 VLESS 二维码 PNG（`vless-qr`） | 离线单元测试已覆盖 |
-| 导出 Mihomo YAML（`mihomo-provider` 或 `mihomo-profile`） | 本地测试；实测 Mihomo 1.19.33/1.19.34 对接 Xray 26.11.9 REALITY 需要 `support-x25519mlkem768` |
+| 导出本地 VLESS 二维码 PNG（`vless-qr`） | 离线单元测试已覆盖；2026-11-21 在两台已记录节点上，v2rayN 图形界面导入官方 PNG 成功 |
+| 导出 Mihomo YAML（`mihomo-provider` 或 `mihomo-profile`） | 2026-11-21 有限记录：Ubuntu 24.04 与 Debian 13、Xray 26.11.9 上，Mihomo 1.19.33 需要未加引号的 `support-x25519mlkem768: true`；FlClash 0.9.4 导入了这些 profile。不覆盖全部版本组合 |
 | 显式更新公网地址并保留 SSH 主机身份 | 已实现并测试 |
 | SSH 身份保护、事务恢复和本地状态保护 | 已实现，存在明确使用边界 |
 | Web 可视化管理及更广泛的网络功能 | 实验阶段，**不属于首发稳定范围** |
@@ -91,11 +91,11 @@ npm run check
 | `mihomo-provider` | `<ref>.mihomo-provider.yaml` | 已经有 Mihomo / Clash Meta 配置。文件只有 `proxies:` 列表，不含 URI 或 base64。 |
 | `mihomo-profile` | `<ref>.mihomo-profile.yaml` | FlClash 或 Mihomo 需要第一份文件：一个节点、一个 `select` 组、一条末尾 `MATCH` 规则。 |
 
-代理名是 `rq-<节点 id>-<客户端 ref>`，策略组名在其后加 `-select`，同一文件里不会重名。服务器 `network: raw` 导出为 `tcp`，与 URI 一致。只有客户端带 `xtls-rprx-vision` 时才写 `flow`。入站 `decryption` 省略或为 `none` 时才写 `encryption: none`，这也是 URI 里的 `encryption=none`；Mihomo 把这个值当作没有额外的 VLESS 加密。`reality-opts` 另写 `support-x25519mlkem768: true`（布尔、不引号），供 Xray 26.11.9 的 ML-KEM；在 Mihomo 1.19.33 与 1.19.34 对接 Xray 26.11.9 的实测记录里该字段为 REALITY 握手所必需，但不保证所有 Mihomo/Xray 组合。不写 `udp` 和 `packet-encoding`：安装器没有配置数据包编码，而 Mihomo 在省略 `udp` 时默认为 false。profile 不开启 TUN，不改系统 DNS，也不是一套完整路由规则。
+代理名是 `rq-<节点 id>-<客户端 ref>`，策略组名在其后加 `-select`，同一文件里不会重名。服务器 `network: raw` 导出为 `tcp`，与 URI 一致。只有客户端带 `xtls-rprx-vision` 时才写 `flow`。入站 `decryption` 省略或为 `none` 时才写 `encryption: none`，这也是 URI 里的 `encryption=none`；Mihomo 把这个值当作没有额外的 VLESS 加密。`reality-opts` 另写 `support-x25519mlkem768: true`（布尔、不引号），供 Xray 26.11.9 的 ML-KEM。2026-11-21 的记录里，两台已测 VPS 上的隔离 Mihomo 1.19.33 在 REALITY HTTPS 成功前需要该字段。FlClash 0.9.4（内嵌 Mihomo 1.19.34）导入的是已经带有该字段的 profile。不保证所有 Mihomo/Xray 组合。不写 `udp` 和 `packet-encoding`：安装器没有配置数据包编码，而 Mihomo 在省略 `udp` 时默认为 false。profile 不开启 TUN，不改系统 DNS，也不是一套完整路由规则。
 
 FlClash 0.9.0 及更新版本可以解析分享链接，包括 `vless://`。其核心调用 Mihomo 的 `ConvertsV2Ray`，上游有 VLESS REALITY 往返测试。链接解析成功不等于已经和 RouteQuay 固定的 Xray 26.11.9 完成握手，分享链接里也没有策略组或规则。因此仍建议 FlClash 使用 YAML。
 
-Mihomo 的 TLS/REALITY 文档写明不考虑与 xray-core v26.7.11 及更新版本的兼容。RouteQuay 只安装 26.11.9，并且不设置 `minClientVer`。该 Xray 版本里，默认的 `minClientVer=26.3.27` 赋值已被注释；捆绑的 REALITY 库在 `MinClientVer` 为 nil 时跳过版本检查。本次导出不会修改 `minClientVer`，也不会为了兼容而削弱 REALITY。在真实客户端矩阵跑通之前，Mihomo 与 FlClash 的互通视为未验证。
+Mihomo 的 TLS/REALITY 文档写明不考虑与 xray-core v26.7.11 及更新版本的兼容。RouteQuay 只安装 26.11.9，并且不设置 `minClientVer`。该 Xray 版本里，默认的 `minClientVer=26.3.27` 赋值已被注释；捆绑的 REALITY 库在 `MinClientVer` 为 nil 时跳过版本检查。本次导出不会修改 `minClientVer`，也不会为了兼容而削弱 REALITY。2026-11-21（Asia/Shanghai）在两台已测 VPS 上对 Mihomo 1.19.33 与 FlClash 0.9.4 的有限检查写在测试说明里。该记录不延伸到全部 Mihomo/Xray 组合，不包括合并后对官方文件再跑一遍隔离 HTTPS，也不把扫描 VLESS 二维码当成携带 Mihomo YAML ML-KEM 字段的方式。
 
 ## 🧪 测试
 
@@ -107,7 +107,7 @@ npm run test:unit
 npm run test:safety
 ```
 
-`npm run check` 汇总文件白名单、路径与敏感模式检查及本候选选取的核心、导出器、SSH、CLI 及 smoke 检查，不等于原完整应用测试集。Ubuntu 24.04 / Debian 13 的公网 HTTPS 实机验收另有记录；本地 mock 测试通过不等于新环境一定部署成功。
+`npm run check` 汇总文件白名单、路径与敏感模式检查及本候选选取的核心、导出器、SSH、CLI 及 smoke 检查，不等于原完整应用测试集。Ubuntu 24.04 / Debian 13 的公网 HTTPS 实机验收另有记录。测试说明包含 2026-11-21 的客户端检查及其边界。本地 mock 测试通过不等于新环境一定部署成功。
 
 测试依据与限制见 [测试说明](docs/TESTING.zh-CN.md)。
 

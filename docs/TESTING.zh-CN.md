@@ -7,6 +7,7 @@
 ## 测试范围
 
 - 已归档的 Ubuntu 24.04 LTS、Debian 13 实机验收：首次安装、状态校验、客户端导出、v2rayN 实际 HTTPS 请求均通过。
+- 2026-11-21（Asia/Shanghai，UTC+8）在这两台已测 VPS 上补充了有限的 Mihomo、FlClash 与 v2rayN 二维码图像导入记录。边界见下文同名小节，不扩大发行版或客户端范围，也不改写更早的安装验收。
 - Debian 曾出现旧公网 IP 的特定连接路径问题。通过合法更换公网 IP 并进行 SSH 主机身份验证后，完成端到端代理验证。旧 IP 的最终丢包位置及根因未被证明。
 - 新增 endpoint 更新、安全 journal 校验、并发 export 与节点锁清理逻辑完成本地测试和针对性独立复审。
 
@@ -35,7 +36,7 @@ npm run test:safety
 
 这些检查不连接 SSH，也不与 FlClash 或 Mihomo 握手。Windows ACL 用例在 `process.platform !== 'win32'` 时直接返回，TAP 仍会计为通过；只在 Linux 上跑完测试，不能写成已经执行 Windows ACL。POSIX 文件 0600、目录 0700 只在实际执行该断言的系统上成立。
 
-兼容性口径与 README 相同：FlClash 0.9.0+ 可以解析 `vless://`，但解析成功不是握手成功；不把当前 26.11.9 安装写成必然拒绝 Mihomo；不把 `minClientVer` 改成 1.8.2，也不削弱 REALITY。
+兼容性口径与 README 相同：FlClash 0.9.0+ 可以解析 `vless://`，但解析成功不是握手成功；不把当前 26.11.9 安装写成必然拒绝 Mihomo；不把 `minClientVer` 改成 1.8.2，也不削弱 REALITY。2026-11-21 的有限实机记录只覆盖下文点名的版本与两台 VPS。
 
 ### 2026-11-20 本地复测
 
@@ -43,12 +44,36 @@ Linux、Node.js v22.23.4 上执行 `npm ci --ignore-scripts --no-audit --no-fund
 
 同一次 CLI 测试中，Windows ACL 用例因平台不是 win32 立即返回，TAP 仍把它计为通过。这次没有执行 Windows ACL。文件 0600 与目录 0700 的断言在这次 Linux 运行里执行并通过。
 
+## 2026-11-21 客户端有限验收（Asia/Shanghai，UTC+8）
+
+本节只记录 PR #3 合并进 `main`（`f918246`）之后、2026-11-21 当天实际做过的检查。环境是 Ubuntu 24.04 与 Debian 13 两台 VPS，Xray 26.11.9，TCP 8443，REALITY target/SNI 为 `www.cloudflare.com:443`。结论停在这两台主机和下面点名的客户端版本。
+
+官方导出在 `mihomo-provider` 与 `mihomo-profile` 的 `reality-opts` 中写入未加引号的布尔值 `support-x25519mlkem768: true` 之后，记录如下。
+
+**隔离 Mihomo 1.19.33 的 HTTPS 对照。** 两台 VPS 都做了对照。没有该字段时 REALITY 认证失败；只加上该字段后，发往测试目标的 HTTPS 返回 HTTP 200，TLS 校验通过，出口地址等于对应 VPS 的公网地址。这一结果先在临时测试 YAML 副本上得到。合并后重新导出的两份官方 profile，与这些已经过图形界面测试的副本 SHA-256 相同：Ubuntu `dde28473d951af5c24f25d9d8152230358913943b6c563d7ed456034de9fc6cf`，Debian `c6a8ff2dfd0b16a4234fcecbff1d20677f721e2afb9e2294986ad10626cb8d92`。
+
+**FlClash 0.9.4（内嵌 Mihomo 1.19.34）。** 图形界面以文件方式导入上述带 ML-KEM 字段的测试 profile。Ubuntu 节点延迟 121 ms，面板出口地址等于该 VPS 公网地址（具体地址不写入公开文档），服务检查为绿色；Debian 节点延迟 125 ms。测试机上 mixed 入站 7890 的绑定冲突仍然存在，与这次导入相互独立，本次没有修复。本次未把 FlClash 记成日常应用代理，也未把 mixed 端口记成可用。最后一次会话没有改用合并后的官方文件重新导入 FlClash；当时的依据是官方 profile 与已测副本的哈希一致。
+
+**合并后的官方 CLI 导出。** 2026-11-21 在 `main` `f918246` 之后重新生成。四份官方 Mihomo YAML 为两台 VPS 各自的 `mihomo-provider` 与 `mihomo-profile`，都含未加引号的 `support-x25519mlkem768: true`。Mihomo 1.19.33 的 `-t` 在这四份文件上都成功。两台节点的官方 `vless-qr` PNG 按仓库测试的做法用 jsqr 离线解码；去掉同一次 `v2rayn` 文本文件末尾换行后，与该 URI 一致。
+
+**v2rayN 二维码图像导入。** 2026-11-21 用图形界面导入上述官方 PNG，两台节点都成功：Debian 延迟 120 ms，Ubuntu 延迟 131 ms。更早一次 Ubuntu v2rayN 的 URI/图形界面测试记录为 124 ms、13.8 MB/s，与本次 2026-11-21 的二维码图像导入分开保留。
+
+**本次未覆盖：**
+
+- 合并之后没有再对官方文件重跑隔离 HTTPS。已有证据是临时副本上的对照、FlClash 图形界面导入，以及官方 profile 与已测副本哈希相同。
+- 扫描 VLESS URI 二维码不会带上 Mihomo YAML 里的 ML-KEM 字段。FlClash 继续使用 YAML。
+- 已审阅 URL 订阅托管，本次没有引入。CLI 保持本地优先，凭据留在私有本地文件。
+- REALITY 与 `minClientVer` 保持原样。
+- 不覆盖全部 Mihomo 与 Xray 版本组合。
+- 测试当时的临时本机 /32 路由和安全组 /32 放行是环境条件，不是产品功能。本文不记录测试机广域网地址或安全组网段。
+
 ## 不能从当前结果推断的事项
 
 - 不代表对所有 Linux 版本或云服务商提供兼容保证。
 - 不代表已经验证长期稳定性、全部网络运营商或高负载吞吐。
 - 不代表实验性的 Web 管理功能达到可发布质量。
 - 本地模拟通过不等于远端实机测试重新执行。
+- 2026-11-21 客户端记录的未覆盖项仍然成立，包括未重跑的官方文件隔离 HTTPS、未用官方文件重导入的 FlClash，以及未测的 Mihomo/Xray 版本组合。
 
 ## 测试安全
 

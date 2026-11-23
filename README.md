@@ -24,8 +24,8 @@ Several mature networking and Xray management projects already exist. RouteQuay 
 | Adopt an existing Xray installation without replacing it | Verified in integration tests |
 | Read-only deployment planning and node status | Implemented and tested |
 | Export a VLESS/REALITY client link for v2rayN | Verified end-to-end |
-| Export a local VLESS QR PNG (`vless-qr`) | Verified offline in tests |
-| Export Mihomo YAML (`mihomo-provider` or `mihomo-profile`) | Local tests; Mihomo 1.19.33/1.19.34 require `support-x25519mlkem768` with Xray 26.11.9 REALITY in recorded tests |
+| Export a local VLESS QR PNG (`vless-qr`) | Offline decode in unit tests; 2026-11-21 v2rayN GUI image import succeeded on the two recorded nodes |
+| Export Mihomo YAML (`mihomo-provider` or `mihomo-profile`) | 2026-11-21 limited record: on Ubuntu 24.04 and Debian 13 with Xray 26.11.9, Mihomo 1.19.33 required unquoted `support-x25519mlkem768: true`; FlClash 0.9.4 imported those profiles. Not every version pair |
 | Explicitly update a server endpoint while preserving SSH host identity | Implemented and tested |
 | SSH identity checks, transaction recovery, local state protection | Implemented; see limitations |
 | Web management UI and broader network management | Experimental; **not part of the first stable scope** |
@@ -91,11 +91,11 @@ This does **not** authorize a new SSH server identity. Strict host-key validatio
 | `mihomo-provider` | `<ref>.mihomo-provider.yaml` | A Mihomo / Clash Meta profile already exists. The file is only a `proxies:` list, not a URI or base64 document. |
 | `mihomo-profile` | `<ref>.mihomo-profile.yaml` | FlClash or Mihomo needs a first file: one proxy, one `select` group, and a final `MATCH` rule. |
 
-Proxy and group names are `rq-<nodeId>-<clientRef>` and `rq-<nodeId>-<clientRef>-select`, so they do not collide in one file. Server `network: raw` is exported as `tcp`, matching the URI. `flow` is written only for `xtls-rprx-vision`. `encryption: none` is written only when the inbound decryption is omitted or `none`, which is also the URI's `encryption=none`. Mihomo treats that value as no extra VLESS encryption. `reality-opts` also sets `support-x25519mlkem768: true` (boolean, unquoted) for Xray 26.11.9 ML-KEM; in Mihomo 1.19.33 and 1.19.34 this field was required for REALITY handshake success in recorded tests, but not every Mihomo/Xray pairing is guaranteed. `udp` and `packet-encoding` are omitted: the installer does not set packet encoding, and omitted `udp` is Mihomo's false default. The profile does not enable TUN, does not change system DNS, and is not a full routing ruleset.
+Proxy and group names are `rq-<nodeId>-<clientRef>` and `rq-<nodeId>-<clientRef>-select`, so they do not collide in one file. Server `network: raw` is exported as `tcp`, matching the URI. `flow` is written only for `xtls-rprx-vision`. `encryption: none` is written only when the inbound decryption is omitted or `none`, which is also the URI's `encryption=none`. Mihomo treats that value as no extra VLESS encryption. `reality-opts` also sets `support-x25519mlkem768: true` (boolean, unquoted) for Xray 26.11.9 ML-KEM. In the 2026-11-21 record, isolated Mihomo 1.19.33 on both tested VPS hosts required this field before REALITY HTTPS succeeded. FlClash 0.9.4 (embedded Mihomo 1.19.34) imported profiles that already contained the field. Not every Mihomo/Xray pairing is guaranteed. `udp` and `packet-encoding` are omitted: the installer does not set packet encoding, and omitted `udp` is Mihomo's false default. The profile does not enable TUN, does not change system DNS, and is not a full routing ruleset.
 
 FlClash 0.9.0 and later can parse share links, including `vless://`. Its core calls Mihomo `ConvertsV2Ray`, and upstream has a VLESS REALITY round-trip test. Parsing a link is not a completed handshake with RouteQuay's pinned Xray 26.11.9, and a link has no groups or rules. YAML is the recommended FlClash path for that reason.
 
-Mihomo's TLS/REALITY documentation says it will not consider compatibility with xray-core v26.7.11 or newer. RouteQuay installs only 26.11.9 and does not set `minClientVer`. In that Xray version the default `minClientVer=26.3.27` assignment is commented out, and the bundled REALITY library skips the version check when `MinClientVer` is nil. This export does not change `minClientVer` and does not weaken REALITY. Treat Mihomo and FlClash interoperability as unverified until a real client matrix is run.
+Mihomo's TLS/REALITY documentation says it will not consider compatibility with xray-core v26.7.11 or newer. RouteQuay installs only 26.11.9 and does not set `minClientVer`. In that Xray version the default `minClientVer=26.3.27` assignment is commented out, and the bundled REALITY library skips the version check when `MinClientVer` is nil. This export does not change `minClientVer` and does not weaken REALITY. A limited check on 2026-11-21 (Asia/Shanghai) is recorded in the testing notes for Mihomo 1.19.33 and FlClash 0.9.4 on the two tested VPS hosts. That record does not extend to every Mihomo/Xray pair, does not repeat an isolated HTTPS run of the official files after merge, and does not treat a scanned VLESS QR as a carrier of the Mihomo YAML ML-KEM field.
 
 ## 🧪 Testing
 
@@ -107,7 +107,7 @@ npm run test:unit
 npm run test:safety
 ```
 
-Run `npm run check` for allowlist and privacy-pattern checks plus all selected core, exporter, SSH, CLI and smoke tests. This is a scoped suite, not the old full application suite. Real-machine acceptance for Ubuntu 24.04 and Debian 13 was separately performed and recorded; passing mocked tests does not itself prove a new deployment.
+Run `npm run check` for allowlist and privacy-pattern checks plus all selected core, exporter, SSH, CLI and smoke tests. This is a scoped suite, not the old full application suite. Real-machine acceptance for Ubuntu 24.04 and Debian 13 was separately performed and recorded. The testing notes include the 2026-11-21 client check and its limits. Passing mocked tests does not itself prove a new deployment.
 
 See [Testing notes](docs/TESTING.zh-CN.md) for the evidence boundary and validation checklist.
 
