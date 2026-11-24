@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { AdoptionError, createOpenSshTransport, runAdoption, type AdoptionOptions, type AdoptionResult, type AdoptionTransport } from '../../../packages/core/src/xray-adoption.ts';
+import { AdoptionError, createOpenSshTransport, runAdoption, runClientGroups, type AdoptionOptions, type AdoptionResult, type AdoptionTransport, type ClientGroupCommand } from '../../../packages/core/src/xray-adoption.ts';
+import { isGroupName } from '../../../packages/core/src/client-groups.ts';
 import { isLocalLabel } from '../../../packages/core/src/xray-client.ts';
 import { InstallLayoutError, resolveStateRoot } from '../../../packages/core/src/install-layout.ts';
 import { applyOperatorSshAlias, initOperatorConfig, operatorConfigPath, operatorSshFiles, readOperatorConfig } from '../../../packages/core/src/operator-config.ts';
@@ -15,9 +16,15 @@ export const help = `routequay — 通过 OpenSSH 接管现有 Xray
   routequay setup <node> [--ssh <Host>] [--plan | --apply] [--port 8443] [--json]
   routequay status <node> [--ssh <Host>] [--json]
   routequay endpoint <node> --host <new-host> [--json]
-  routequay export <node> --to v2rayn|vless-qr|mihomo-provider|mihomo-profile|sing-box [--client <ref>] [--out <path>] [--json]
-  routequay pull <node> [--ssh <Host>] [--client <ref>] [--out <目录>] [--json]
+  routequay export <node> --to v2rayn|vless-qr|mihomo-provider|mihomo-profile|sing-box [--client <ref> | --group <name>] [--out <path>] [--json]
+  routequay pull <node> [--ssh <Host>] [--client <ref> | --group <name>] [--out <目录>] [--json]
   routequay add-client <node> [--ssh <Host>] [--inbound inbound-N] [--name <email>] [--owner <标签>] [--remark <备注>] [--plan | --apply] [--json]
+  routequay group <node> list [--json]
+  routequay group <node> create <name> [--json]
+  routequay group <node> rename <name> <new-name> [--json]
+  routequay group <node> remove <name> [--json]
+  routequay group <node> add-member <name> --client <ref> [--json]
+  routequay group <node> remove-member <name> --client <ref> [--json]
   routequay init-config
 
 默认 SSH Host 与 node 同名；接管后复用已保存的 Host。
@@ -46,11 +53,13 @@ pull 一次写回五种现行文件：VLESS URI、VLESS 二维码 PNG、Mihomo p
 成功的空机安装，以及接管已有实例且本地状态发生变化时，会自动做同样的带回。状态未变化时不改这些文件。
 pull 的同名现行文件：内容相同则保留并重新收紧权限；内容不同则覆盖。符号链接直接拒绝。
 单次 export 在内容不同时仍拒绝并返回 OUTPUT_EXISTS。export 本身不会覆盖已有文件。
-多客户端时 pull 与 export 都要用 status 返回的 ref 选择。自动带回也不会猜测客户端；此时请再执行 pull --client <ref>。
+多客户端时 pull 与 export 都要用 status 返回的 ref 选择，或用 --group 选择一个本机分组。自动带回也不会猜测客户端；此时请再执行 pull --client <ref>。
 add-client 在已经接管的节点上追加一个人或一台设备。同一个入站继续共用端口和 REALITY 参数；新的 UUID 只作为 clients[] 的新条目。已有客户端的 UUID 保持不变，不会顺带轮换私钥、shortId、SNI、端口或 minClientVer。
 只有一个受支持的入站时可以省略 --inbound。有多个入站时必须写 status 同一套编号里的 inbound-N。--name 是写入服务器的 email，省略时使用 client-N。--owner 和 --remark 只写在本地元数据里，不上传，也不出现在终端输出。
 --plan 只读，不重启服务，也不写文件。非交互执行必须带 --apply；交互执行会确认一次。确认后重启 xray，并在私有目录写下这个新客户端的五种现行文件。终端只打印路径。
-追加之后节点上会有多个客户端。之后的 pull 和 export 必须显式带上 --client inbound-N-client-N。status 仍列出这些 ref。
+追加之后节点上会有多个客户端。之后的 pull 和 export 必须显式带上 --client inbound-N-client-N，或带上 --group。status 仍列出这些 ref，并列出本机分组。
+group 只在本机维护分组，文件是私有数据目录下的 local/private/cli-nodes/<node>/groups.local.json。分组名由操作员自己决定，例如 self 或 friend-a。程序不内置家人、同学或朋友这类分类。成员只写 status 使用的 inbound-N-client-N。添加成员时对照本机已接管状态里的 ref，不连接服务器。分组不上传，也不执行流量、到期、启停或远程删除。remove 只删除这条本地分组，不删除远程客户端，也不改 UUID。文件不存在表示还没有分组。文件残缺、字段多余或无法解析时命令失败，代码是 GROUP_STORE_INVALID，并且不改写该文件。终端和 --json 只打印分组名、ref 和文件路径。
+status 列出每个分组的名字和成员 ref。export 与 pull 加上 --group <name> 时，为该分组里的每个成员分别写入现行文件，仍然只打印路径。这不会生成分组订阅地址，也不会把多个客户端合成一个公开文件。--group 与 --client 不能同时使用。带 --group 时，export 的 --out 必须是已经存在的目录。
 --to v2rayn 写 VLESS URI（.vless.txt）。--to vless-qr 离线生成同一条 URI 的 PNG 二维码（.vless.png）。
 --to mihomo-provider 只写 proxies 列表。--to mihomo-profile 写最小配置：一个节点、一个 select 组、一条 MATCH；不开启 TUN，不改系统 DNS。
 mihomo YAML 的 reality-opts 写入 support-x25519mlkem768；已在 Mihomo 1.19.33/1.19.34 对接 Xray 26.11.9 REALITY 的实测中验证为必需，不保证所有客户端组合。
@@ -113,22 +122,58 @@ export function parseArguments(args: string[]): SetupOptions {
       if (flag === '--remark') options.remark = value;
       if (flag === '--inbound') options.inbound = value;
     }
-    else if (['--ssh', '--out', '--client', '--to'].includes(flag)) {
+    else if (['--ssh', '--out', '--client', '--to', '--group'].includes(flag)) {
       const value = flags[++i];
       if (!value || value.startsWith('-')) throw new AdoptionError('OPTION_VALUE_REQUIRED');
       const artifactCommand = command === 'export' || command === 'pull';
       if (flag === '--to' && command !== 'export') throw new AdoptionError('OPTION_NOT_APPLICABLE');
-      if ((flag === '--out' || flag === '--client') && !artifactCommand) throw new AdoptionError('OPTION_NOT_APPLICABLE');
+      if ((flag === '--out' || flag === '--client' || flag === '--group') && !artifactCommand) throw new AdoptionError('OPTION_NOT_APPLICABLE');
+      if (flag === '--group' && !isGroupName(value)) throw new AdoptionError('OPTION_VALUE_INVALID');
       if (flag === '--ssh') options.ssh = value;
       if (flag === '--out') options.out = value;
       if (flag === '--client') options.client = value;
       if (flag === '--to') options.to = value;
+      if (flag === '--group') options.group = value;
     } else throw new AdoptionError('UNKNOWN_OPTION');
   }
   if (command === 'endpoint' && !options.expectedHost) throw new AdoptionError('ENDPOINT_CONFIRMATION_REQUIRED', 3);
   if (command === 'export' ? !isExportFormat(options.to) : options.to !== 'v2rayn') throw new AdoptionError('EXPORT_FORMAT_UNSUPPORTED');
   if (options.plan && options.apply) throw new AdoptionError('CONFLICTING_OPTIONS');
+  if (options.client && options.group) throw new AdoptionError('CONFLICTING_OPTIONS');
   return options;
+}
+const groupActions = ['list', 'create', 'rename', 'remove', 'add-member', 'remove-member'] as const;
+export function parseGroupArguments(args: string[]): ClientGroupCommand & { dataDir?: string } {
+  const [command, nodeId, action, ...rest] = args;
+  if (command !== 'group' || !nodeId || nodeId.startsWith('-') || !groupActions.includes(action as typeof groupActions[number])) throw new AdoptionError('USAGE');
+  const parsed: ClientGroupCommand & { dataDir?: string } = { nodeId, action: action as ClientGroupCommand['action'] };
+  const positionals: string[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < rest.length; i++) {
+    const flag = rest[i]!;
+    if (!flag.startsWith('-')) { positionals.push(flag); continue; }
+    if (seen.has(flag)) throw new AdoptionError('DUPLICATE_OPTION');
+    seen.add(flag);
+    if (flag === '--json') continue;
+    if (flag === '--data-dir' || flag === '--client') {
+      const value = rest[++i];
+      if (!value || value.startsWith('-')) throw new AdoptionError('OPTION_VALUE_REQUIRED');
+      if (flag === '--data-dir') parsed.dataDir = value;
+      else {
+        if (action !== 'add-member' && action !== 'remove-member') throw new AdoptionError('OPTION_NOT_APPLICABLE');
+        if (!/^inbound-[1-9]\d*-client-[1-9]\d*$/.test(value)) throw new AdoptionError('OPTION_VALUE_INVALID');
+        parsed.client = value;
+      }
+    } else throw new AdoptionError('UNKNOWN_OPTION');
+  }
+  const named = action === 'list' ? 0 : action === 'rename' ? 2 : 1;
+  if (positionals.length !== named) throw new AdoptionError('USAGE');
+  if (named >= 1 && !isGroupName(positionals[0]!)) throw new AdoptionError('OPTION_VALUE_INVALID');
+  if (named === 2 && !isGroupName(positionals[1]!)) throw new AdoptionError('OPTION_VALUE_INVALID');
+  if (named >= 1) parsed.name = positionals[0];
+  if (named === 2) parsed.newName = positionals[1];
+  if ((action === 'add-member' || action === 'remove-member') && !parsed.client) throw new AdoptionError('OPTION_VALUE_REQUIRED');
+  return parsed;
 }
 export async function runAddClient(options: SetupOptions, root: string, transport: AdoptionTransport,
   confirm?: (preview: AdoptionResult) => Promise<boolean>): Promise<AdoptionResult> {
@@ -147,6 +192,7 @@ export function renderHumanResult(result: AdoptionResult): string {
     `检查时间 ${result.checkedAt}`,
     `客户端 ${(result.clients as string[]).join(', ') || '无'}`
   ];
+  appendGroupLines(lines, result);
   if ('plan' in result) lines.push(JSON.stringify(result.plan, null, 2));
   if ('networkStatus' in result) lines.push(`网络验证 ${result.networkStatus}`);
   const outputFiles = Array.isArray(result.outputFiles) ? result.outputFiles : [];
@@ -163,10 +209,44 @@ export function renderHumanResult(result: AdoptionResult): string {
   lines.push(`未验证 ${(result.unverified as string[]).join(', ')}`);
   return lines.join('\n');
 }
+function groupLabel(group: unknown): string | undefined {
+  if (!group || typeof group !== 'object') return undefined;
+  const record = group as { name?: unknown; members?: unknown };
+  if (typeof record.name !== 'string' || !Array.isArray(record.members)) return undefined;
+  const members = record.members.filter((member): member is string => typeof member === 'string');
+  return `分组 ${record.name}${members.length ? ' · ' + members.join(', ') : ''}`;
+}
+function appendGroupLines(lines: string[], result: AdoptionResult): void {
+  if (typeof result.group === 'string' && !Array.isArray(result.groups)) {
+    const members = Array.isArray(result.members) ? result.members.filter((member): member is string => typeof member === 'string') : [];
+    lines.push(`分组 ${result.group}${members.length ? ' · ' + members.join(', ') : ''}`);
+  }
+  if (!Array.isArray(result.groups)) return;
+  if (!result.groups.length) lines.push('分组 无');
+  for (const group of result.groups) {
+    const line = groupLabel(group);
+    if (line) lines.push(line);
+  }
+}
+export function renderGroupResult(result: AdoptionResult): string {
+  const lines = [`${result.nodeId} · ${result.status}`, `检查时间 ${result.checkedAt}`];
+  if (typeof result.groupFile === 'string') lines.push(`本地分组 ${result.groupFile}`);
+  appendGroupLines(lines, result);
+  if (result.code) lines.push(`原因 ${result.code}`);
+  return lines.join('\n');
+}
 export async function main(args = process.argv.slice(2), env: NodeJS.ProcessEnv = process.env): Promise<number> {
   if (args.includes('--help') || args.length === 0) { console.log(help); return 0; }
   try {
     const programRoot = fileURLToPath(new URL('../../../', import.meta.url));
+    if (args[0] === 'group') {
+      const groupCommand = parseGroupArguments(args);
+      const config = readOperatorConfig(operatorConfigPath(env));
+      const root = resolveStateRoot(programRoot, { dataDir: groupCommand.dataDir, configuredDataDir: config?.dataDir, env });
+      const result = runClientGroups(groupCommand, root);
+      console.log(args.includes('--json') ? JSON.stringify(result) : renderGroupResult(result));
+      return result.code ? (['completed-cleanup-failed', 'cleanup-failed'].includes(String(result.status)) ? 4 : 2) : 0;
+    }
     if (args[0] === 'init-config' || args[0] === 'init') {
       if (args.slice(1).some(arg => arg !== '--json')) throw new AdoptionError('UNKNOWN_OPTION');
       const configPath = initOperatorConfig(programRoot, operatorConfigPath(env));

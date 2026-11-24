@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { clientConnectionSpec, defaultExportFileName, exportFormats, isExportFormat, validateClientExportFields, type ExportFormat } from '../../exporters/src/client-connection.ts';
 import { renderClientExport } from '../../exporters/src/mihomo-yaml.ts';
 import { renderVlessQrPng } from '../../exporters/src/vless-qr.ts';
+import { applyGroupAction, emptyClientGroupFile, groupFileName, GroupStoreError, parseClientGroupFile, serializeClientGroupFile, type ClientGroupFile, type GroupMutation } from './client-groups.ts';
 import { buildClientAppend, buildClientChangeScript, canonicalDigest, describeClientAppend, isLocalLabel, type ClientChangePayload } from './xray-client.ts';
 
 type ExportBody = string | Buffer;
@@ -242,8 +243,9 @@ export function privateWrite(path: string, data: string, replace = false): void 
 }
 type State = { schemaVersion: string; nodeId: string; target: SshTarget; hash: string; probe: Probe };
 export type AdoptionOptions = { command: 'setup' | 'status' | 'export' | 'endpoint' | 'pull' | 'add-client'; nodeId: string; ssh?: string;
-  expectedHost?: string; plan?: boolean; apply?: boolean; json?: boolean; out?: string; client?: string; to?: string; dataDir?: string;
+  expectedHost?: string; plan?: boolean; apply?: boolean; json?: boolean; out?: string; client?: string; group?: string; to?: string; dataDir?: string;
   inbound?: string; name?: string; ownerLabel?: string; remark?: string; };
+export type ClientGroupCommand = { nodeId: string; action: GroupMutation['action'] | 'list'; name?: string; newName?: string; client?: string; };
 export type AdoptionResult = { schemaVersion: string; nodeId: string; operation: string; status: string;
   changed: boolean; checkedAt: string; [key: string]: unknown };
 export function configDigest(config: unknown): string {
@@ -372,13 +374,19 @@ function runAdoptionLocked(options: AdoptionOptions, root: string, transport: Ad
       firstInstallPlatform: supportsFirstInstallPlatform(probe.linux.os, probe.linux.release),
       configurationChanges: 'not-implemented', recovery: 'owned-first-install-transactions-only' };
   }
-  if (probe.loadState === 'not-found') return { ...result, status: 'not-installed', installed: false, code: 'XRAY_NOT_INSTALLED' };
-  if (probe.layout !== 'single-file' || !probe.config) return { ...result, status: 'unsupported', code: 'LAYOUT_UNSUPPORTED' };
+  if (probe.loadState === 'not-found') {
+    const early = { ...result, status: 'not-installed', installed: false, code: 'XRAY_NOT_INSTALLED' };
+    return options.command === 'status' ? withLocalGroups(early, directory, options.nodeId) : early;
+  }
+  if (probe.layout !== 'single-file' || !probe.config) {
+    const early = { ...result, status: 'unsupported', code: 'LAYOUT_UNSUPPORTED' };
+    return options.command === 'status' ? withLocalGroups(early, directory, options.nodeId) : early;
+  }
   const candidates = exportCandidates(probe.config);
   result.clients = candidates.map(item => item.ref);
   result.status = probe.service === 'active' ? (state ? 'managed' : 'installed-running') : 'installed-stopped';
   result.diskMatchesRunning = probe.diskMatchesRunning;
-  if (options.command === 'status') return result;
+  if (options.command === 'status') return withLocalGroups(result, directory, options.nodeId);
   if (options.command === 'add-client') {
     return completeAddClient({ options, root, transport, directory, statePath, state, originalState, target, resolved, probe, result, sameConnection });
   }
@@ -422,30 +430,42 @@ function runAdoptionLocked(options: AdoptionOptions, root: string, transport: Ad
       return { ...result, status: 'endpoint-updated', changed: true };
     });
   }
-  const selected = options.client ? candidates.find(item => item.ref === options.client) : candidates.length === 1 ? candidates[0] : undefined;
-  if (!selected) fail(options.client ? 'CLIENT_NOT_FOUND' : 'CLIENT_SELECTION_REQUIRED');
+  if (options.client && options.group) fail('CONFLICTING_OPTIONS');
   const exportFormat = options.to ?? 'v2rayn';
   if (!isExportFormat(exportFormat)) fail('EXPORT_FORMAT_UNSUPPORTED');
-  const { inbound, client } = selected;
-  const reality = inbound.streamSettings?.realitySettings && typeof inbound.streamSettings.realitySettings === 'object'
-    ? inbound.streamSettings.realitySettings : {};
-  const fields = validateClientExportFields({
-    network: inbound.streamSettings?.network ?? 'tcp',
-    flow: client.flow,
-    serverNames: reality.serverNames,
-    shortIds: reality.shortIds,
-    decryption: inbound.settings?.decryption
-  });
-  if (!fields.ok) fail(fields.code);
-  const publicKey = realityPublicKey(reality.privateKey);
-  if (!probe.listeners.some(address => address.endsWith(`:${inbound.port}`))) fail('INBOUND_NOT_LISTENING');
-  const spec = clientConnectionSpec({
-    nodeId: options.nodeId, clientRef: selected.ref, server: target.host, port: inbound.port, uuid: client.id,
-    publicKey, network: fields.network, flow: fields.flow, serverName: fields.serverName, shortId: fields.shortId,
-    encryption: fields.encryption
-  });
+  const groupedRefs = options.group ? groupMemberRefs(directory, options.nodeId, options.group) : undefined;
+  const selectedList = groupedRefs
+    ? groupedRefs.map(ref => {
+      const found = candidates.find(item => item.ref === ref);
+      if (!found) fail('CLIENT_NOT_FOUND');
+      return found;
+    })
+    : [options.client ? candidates.find(item => item.ref === options.client) : candidates.length === 1 ? candidates[0] : undefined];
+  if (selectedList.some(item => !item)) fail(options.client ? 'CLIENT_NOT_FOUND' : 'CLIENT_SELECTION_REQUIRED');
+  const chosen = selectedList as Array<{ ref: string; inbound: any; client: any }>;
+  const specs = chosen.map(item => ({ ref: item.ref, spec: connectionSpec(options.nodeId, target.host, probe, item) }));
   if (readFileSync(statePath, 'utf8') !== originalState) fail('LOCAL_STATE_CHANGED', 3);
   if (!sameConnection(transport.resolve(target.alias), resolved)) fail('SSH_TARGET_CHANGED', 3);
+  if (options.group) {
+    const membership = { group: options.group, members: specs.map(item => item.ref) };
+    if (options.command === 'pull') {
+      const targetDirectory = options.out ? resolve(options.out) : directory;
+      for (const item of specs) {
+        for (const format of exportFormats) assertNoLinks(resolve(join(targetDirectory, defaultExportFileName(item.ref, format))));
+      }
+      const parts = specs.map(item => writeBringBackFiles(directory, options.out, item.ref, item.spec));
+      const outputFiles = parts.flatMap(part => part.outputFiles);
+      return { ...result, status: parts.some(part => part.changed) ? 'exported' : 'unchanged',
+        changed: parts.some(part => part.changed), outputFiles, outputDirectory: parts[0]?.outputDirectory,
+        ...membership, formats: [...new Set(parts.flatMap(part => part.formats))], fingerprint: 'chrome' };
+    }
+    const wrote = writeGroupExport(directory, options.out, exportFormat, specs);
+    return { ...result, status: wrote.changed ? 'exported' : 'unchanged', changed: wrote.changed,
+      outputFiles: wrote.outputFiles, outputDirectory: wrote.outputDirectory, ...membership,
+      format: exportFormatLabel(exportFormat), fingerprint: 'chrome' };
+  }
+  const selected = chosen[0]!;
+  const spec = specs[0]!.spec;
   if (options.command === 'pull') {
     const wrote = writeBringBackFiles(directory, options.out, selected.ref, spec);
     return { ...result, status: wrote.changed ? 'exported' : 'unchanged', changed: wrote.changed, outputFile: wrote.outputFile,
@@ -485,6 +505,58 @@ function writeBringBackFiles(directory: string, out: string | undefined, ref: st
   return { changed: outputFiles.some(file => file.status === 'exported'),
     outputFile: outputFiles.find(file => file.format === 'vless-uri')?.path, outputFiles,
     outputDirectory: targetDirectory, formats: outputFiles.map(file => file.format) };
+}
+function connectionSpec(nodeId: string, server: string, probe: Probe, selected: { ref: string; inbound: any; client: any }): ClientSpec {
+  const { inbound, client } = selected;
+  const reality = inbound.streamSettings?.realitySettings && typeof inbound.streamSettings.realitySettings === 'object'
+    ? inbound.streamSettings.realitySettings : {};
+  const fields = validateClientExportFields({
+    network: inbound.streamSettings?.network ?? 'tcp',
+    flow: client.flow,
+    serverNames: reality.serverNames,
+    shortIds: reality.shortIds,
+    decryption: inbound.settings?.decryption
+  });
+  if (!fields.ok) fail(fields.code);
+  const publicKey = realityPublicKey(reality.privateKey);
+  if (!probe.listeners.some((address: string) => address.endsWith(`:${inbound.port}`))) fail('INBOUND_NOT_LISTENING');
+  return clientConnectionSpec({
+    nodeId, clientRef: selected.ref, server, port: inbound.port, uuid: client.id,
+    publicKey, network: fields.network, flow: fields.flow, serverName: fields.serverName, shortId: fields.shortId,
+    encryption: fields.encryption
+  });
+}
+function exportDisposition(output: string, body: ExportBody): 'unchanged' | 'new' {
+  assertNoLinks(output);
+  if (!existsSync(output)) return 'new';
+  const current = lstatSync(output);
+  if (current.isSymbolicLink() || !current.isFile()) fail('PRIVATE_PATH_UNSAFE');
+  if (exportBodiesEqual(readFileSync(output), body)) return 'unchanged';
+  fail('OUTPUT_EXISTS');
+}
+function writeGroupExport(directory: string, out: string | undefined, format: ExportFormat, specs: Array<{ ref: string; spec: ClientSpec }>): {
+  changed: boolean; outputFiles: Array<{ format: string; path: string; status: string }>; outputDirectory: string;
+} {
+  const customOut = Boolean(out);
+  const outputDirectory = customOut ? resolve(out!) : directory;
+  if (customOut) {
+    assertNoLinks(outputDirectory);
+    if (!existsSync(outputDirectory)) fail('OUTPUT_DIRECTORY_MISSING');
+    const current = lstatSync(outputDirectory);
+    if (current.isSymbolicLink() || !current.isDirectory()) fail('PRIVATE_PATH_UNSAFE');
+    privateDirectory(outputDirectory);
+  }
+  const planned = specs.map(item => ({
+    output: resolve(join(outputDirectory, defaultExportFileName(item.ref, format))),
+    body: renderExportBody(format, item.spec)
+  }));
+  for (const file of planned) exportDisposition(file.output, file.body);
+  const outputFiles = planned.map(file => ({
+    format: exportFormatLabel(format),
+    path: file.output,
+    status: commitExportFile(directory, file.output, file.body, customOut)
+  }));
+  return { changed: outputFiles.some(file => file.status === 'exported'), outputFiles, outputDirectory };
 }
 const metadataSchema = 'routequay-client-metadata-v1';
 const journalSchema = 'routequay-client-change-v1';
@@ -712,4 +784,94 @@ function exportCandidates(config: any): Array<{ ref: string; inbound: any; clien
     }
   }
   return result;
+}
+function groupPathFor(directory: string): string {
+  return join(directory, groupFileName);
+}
+function storedGroups(path: string, nodeId: string): ClientGroupFile {
+  assertNoLinks(path);
+  let stat;
+  try { stat = lstatSync(path); }
+  catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return emptyClientGroupFile(nodeId);
+    fail('GROUP_STORE_INVALID');
+  }
+  if (stat.isSymbolicLink()) fail('PRIVATE_PATH_UNSAFE');
+  if (!stat.isFile() || stat.size < 1 || stat.size > 64 * 1024) fail('GROUP_STORE_INVALID');
+  let parsed: unknown;
+  try { parsed = JSON.parse(readFileSync(path, 'utf8')); }
+  catch { fail('GROUP_STORE_INVALID'); }
+  try { return parseClientGroupFile(parsed, nodeId); }
+  catch (error) {
+    if (error instanceof GroupStoreError) fail(error.code);
+    throw error;
+  }
+}
+function writeStoredGroups(path: string, file: ClientGroupFile): void {
+  assertNoLinks(path);
+  try {
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink() || !stat.isFile()) fail('PRIVATE_PATH_UNSAFE');
+  } catch (error) {
+    if (!(error instanceof AdoptionError) && !(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) {
+      fail('GROUP_STORE_INVALID');
+    }
+    if (error instanceof AdoptionError) throw error;
+  }
+  privateWrite(path, serializeClientGroupFile(file), true);
+}
+function withLocalGroups(result: AdoptionResult, directory: string, nodeId: string): AdoptionResult {
+  return { ...result, groups: storedGroups(groupPathFor(directory), nodeId).groups };
+}
+function groupMemberRefs(directory: string, nodeId: string, name: string): string[] {
+  const found = storedGroups(groupPathFor(directory), nodeId).groups.find(group => group.name === name);
+  if (!found) fail('GROUP_NOT_FOUND');
+  if (!found.members.length) fail('GROUP_EMPTY');
+  return [...found.members];
+}
+function knownClientRefs(state: State): Set<string> {
+  return new Set(exportCandidates(state.probe?.config ?? {}).map(item => item.ref));
+}
+export function runClientGroups(command: ClientGroupCommand, root = '.'): AdoptionResult {
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(command.nodeId)) fail('NODE_ID_INVALID');
+  const directory = resolve(root, 'local/private/cli-nodes', command.nodeId);
+  const statePath = join(directory, 'state.local.json');
+  const groupPath = groupPathFor(directory);
+  assertNoLinks(statePath);
+  if (!existsSync(statePath)) fail('SETUP_REQUIRED');
+  const originalState = readFileSync(statePath, 'utf8');
+  let state: State;
+  try { state = JSON.parse(originalState); }
+  catch { fail('LOCAL_STATE_INVALID'); }
+  if (state.schemaVersion !== 'vpncp-adoption-v1' || state.nodeId !== command.nodeId) fail('LOCAL_STATE_INVALID');
+  const knownRefs = knownClientRefs(state);
+  const base: AdoptionResult = { schemaVersion: 'vpncp-result-v1', nodeId: command.nodeId, operation: 'group',
+    action: command.action, status: 'listed', changed: false, checkedAt: new Date().toISOString() };
+  if (command.action === 'list') {
+    const stored = storedGroups(groupPath, command.nodeId);
+    let present = false;
+    try { present = lstatSync(groupPath).isFile() && !lstatSync(groupPath).isSymbolicLink(); }
+    catch { present = false; }
+    return { ...base, groups: stored.groups, ...(present ? { groupFile: groupPath } : {}) };
+  }
+  if (!command.name) fail('USAGE');
+  const name = command.name;
+  return withNodeLock(directory, () => {
+    if (readFileSync(statePath, 'utf8') !== originalState) fail('LOCAL_STATE_CHANGED', 3);
+    const stored = storedGroups(groupPath, command.nodeId);
+    let applied: ReturnType<typeof applyGroupAction>;
+    try {
+      applied = applyGroupAction(stored, {
+        action: command.action as GroupMutation['action'], name, newName: command.newName, client: command.client, knownRefs
+      });
+    } catch (error) {
+      if (error instanceof GroupStoreError) fail(error.code);
+      throw error;
+    }
+    if (applied.changed) writeStoredGroups(groupPath, applied.file);
+    if (readFileSync(statePath, 'utf8') !== originalState) fail('LOCAL_STATE_CHANGED', 3);
+    return { ...base, status: applied.status, changed: applied.changed, groups: applied.file.groups, groupFile: groupPath,
+      group: command.action === 'rename' && applied.changed ? command.newName : name,
+      ...(command.client ? { client: command.client } : {}) };
+  });
 }

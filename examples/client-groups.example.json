@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "routequay-client-groups-v1",
+  "nodeId": "example-node",
+  "groups": [
+    {
+      "name": "self",
+      "members": ["inbound-1-client-1"]
+    },
+    {
+      "name": "friend-a",
+      "members": ["inbound-1-client-2"]
+    }
+  ]
+}

@@ -53,6 +53,8 @@ routequay --help
 routequay setup example-node --plan
 routequay status example-node
 routequay add-client example-node --plan
+routequay group example-node create self
+routequay group example-node add-member self --client inbound-1-client-1
 routequay pull example-node
 ```
 
