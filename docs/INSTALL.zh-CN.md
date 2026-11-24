@@ -42,7 +42,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Yes -
 
 `ssh.configPath` 是要传给 OpenSSH 的配置文件路径。写了这一项时，`ssh -G` 和随后的实际连接都会带上 `ssh -F` 指向该文件。OpenSSH 因此使用这个文件，并且不再读取系统级 `ssh_config`。删掉 `configPath` 则不传 `-F`，仍由 OpenSSH 查找默认配置。`identityFile` 只保存私钥路径，不保存私钥内容。写了这一项时，实际连接追加 `ssh -i` 和 `IdentitiesOnly=yes`，用来设置 IdentityFile，并且不使用 ssh-agent 里的其他密钥。`ssh -G` 不带 `-i`，也不会读取私钥内容。删掉 `identityFile` 则不传 `-i`，密钥仍由 SSH 配置或 ssh-agent 提供。
 
-这两个路径都可以用 `~` 开头。RouteQuay 先展开成绝对路径，再传给 ssh。路径必须是已经存在的普通文件，不能是符号链接。POSIX 上私钥文件不能对组或其他用户可读。空的私钥、超过 32 KiB 的私钥，以及超过 256 KiB 的配置文件，也会被拒绝。不满足时，命令在启动 ssh 之前失败，终端只给出错误码，不打印私钥、口令或文件内容。模板里的 `~/.ssh/config` 和 `~/.ssh/id_ed25519_example` 是占位符。请改成自己的配置文件和密钥路径，或者删掉用不到的字段。RouteQuay 不生成密钥，也不写 SSH 配置。需要口令提示的加密私钥会因为 `BatchMode=yes` 无法交互而失败；请先把这把密钥载入 ssh-agent，并省略 `identityFile`。
+这两个路径都可以用 `~` 开头。RouteQuay 先展开成绝对路径，再传给 ssh。路径必须是已经存在的普通文件，不能是符号链接。POSIX 上私钥文件不能对组或其他用户可读。空的私钥、超过 32 KiB 的私钥，以及超过 256 KiB 的配置文件，也会被拒绝。不满足时，命令在启动 ssh 之前失败，终端只给出错误码，不打印私钥、口令或文件内容。模板不写 `ssh.configPath`、`knownHostsPath` 或 `identityFile`。`init-config` 复制出来的文件因此不会把示例路径传给 `ssh -F` 或 `ssh -i`。需要指定配置文件或密钥时，由操作员写入自己机器上已经存在的路径；用不到就不要添加这些字段。RouteQuay 不生成密钥，也不写 SSH 配置。需要口令提示的加密私钥会因为 `BatchMode=yes` 无法交互而失败；请先把这把密钥载入 ssh-agent，并省略 `identityFile`。
 
 ## 使用命令
 
@@ -52,6 +52,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Yes -
 routequay --help
 routequay setup example-node --plan
 routequay status example-node
+routequay add-client example-node --plan
 routequay pull example-node
 ```
 

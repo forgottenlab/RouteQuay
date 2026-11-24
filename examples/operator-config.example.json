@@ -1,9 +1,5 @@
 {
   "schemaVersion": "routequay-operator-config-v1",
-  "ssh": {
-    "configPath": "~/.ssh/config",
-    "knownHostsPath": "~/.ssh/known_hosts"
-  },
   "dataDir": "~/.routequay",
   "nodes": [
     {
@@ -13,7 +9,6 @@
       "host": "vpn.example.invalid",
       "user": "example-user",
       "port": 22,
-      "identityFile": "~/.ssh/id_ed25519_example",
       "authMethod": "ssh-config"
     }
   ]

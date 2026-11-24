@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { AdoptionError, createOpenSshTransport, runAdoption, type AdoptionOptions, type AdoptionResult } from '../../../packages/core/src/xray-adoption.ts';
+import { AdoptionError, createOpenSshTransport, runAdoption, type AdoptionOptions, type AdoptionResult, type AdoptionTransport } from '../../../packages/core/src/xray-adoption.ts';
+import { isLocalLabel } from '../../../packages/core/src/xray-client.ts';
 import { InstallLayoutError, resolveStateRoot } from '../../../packages/core/src/install-layout.ts';
 import { applyOperatorSshAlias, initOperatorConfig, operatorConfigPath, operatorSshFiles, readOperatorConfig } from '../../../packages/core/src/operator-config.ts';
 import { isExportFormat } from '../../../packages/exporters/src/client-connection.ts';
@@ -16,6 +17,7 @@ export const help = `routequay — 通过 OpenSSH 接管现有 Xray
   routequay endpoint <node> --host <new-host> [--json]
   routequay export <node> --to v2rayn|vless-qr|mihomo-provider|mihomo-profile|sing-box [--client <ref>] [--out <path>] [--json]
   routequay pull <node> [--ssh <Host>] [--client <ref>] [--out <目录>] [--json]
+  routequay add-client <node> [--ssh <Host>] [--inbound inbound-N] [--name <email>] [--owner <标签>] [--remark <备注>] [--plan | --apply] [--json]
   routequay init-config
 
 默认 SSH Host 与 node 同名；接管后复用已保存的 Host。
@@ -26,6 +28,7 @@ host、user、port、knownHostsPath、authMethod 仍只作校验和记录。主�
 BatchMode=yes、StrictHostKeyChecking=yes、ForwardAgent=no、ClearAllForwardings=yes 固定在命令行上，配置文件不能改松。
 这两个路径必须是已存在的普通文件，不能是符号链接。POSIX 上密钥文件不能对组或其他用户可读。空的或过大的密钥和配置文件也会被拒绝。上述情况都在启动 ssh 之前失败，终端只给出错误码。
 init-config 在用户数据目录创建 config.json。文件已存在时拒绝覆盖，退出码 2，并且只打印路径。init 是同一命令。
+模板不包含 ssh.configPath 和 identityFile。需要时再写自己机器上已经存在的路径；用不到就不要加。占位路径不会被传给 ssh。
 setup 接管已有实例；干净 Debian 13 / Ubuntu 24.04 LTS 可安装固定 Xray 26.11.9。
 自动识别架构、systemd、包管理器及文件权限能力；缺依赖时停止，不自动安装包。
 空机交互模式展示计划并确认一次；非交互安装必须指定 --apply。
@@ -44,6 +47,10 @@ pull 一次写回五种现行文件：VLESS URI、VLESS 二维码 PNG、Mihomo p
 pull 的同名现行文件：内容相同则保留并重新收紧权限；内容不同则覆盖。符号链接直接拒绝。
 单次 export 在内容不同时仍拒绝并返回 OUTPUT_EXISTS。export 本身不会覆盖已有文件。
 多客户端时 pull 与 export 都要用 status 返回的 ref 选择。自动带回也不会猜测客户端；此时请再执行 pull --client <ref>。
+add-client 在已经接管的节点上追加一个人或一台设备。同一个入站继续共用端口和 REALITY 参数；新的 UUID 只作为 clients[] 的新条目。已有客户端的 UUID 保持不变，不会顺带轮换私钥、shortId、SNI、端口或 minClientVer。
+只有一个受支持的入站时可以省略 --inbound。有多个入站时必须写 status 同一套编号里的 inbound-N。--name 是写入服务器的 email，省略时使用 client-N。--owner 和 --remark 只写在本地元数据里，不上传，也不出现在终端输出。
+--plan 只读，不重启服务，也不写文件。非交互执行必须带 --apply；交互执行会确认一次。确认后重启 xray，并在私有目录写下这个新客户端的五种现行文件。终端只打印路径。
+追加之后节点上会有多个客户端。之后的 pull 和 export 必须显式带上 --client inbound-N-client-N。status 仍列出这些 ref。
 --to v2rayn 写 VLESS URI（.vless.txt）。--to vless-qr 离线生成同一条 URI 的 PNG 二维码（.vless.png）。
 --to mihomo-provider 只写 proxies 列表。--to mihomo-profile 写最小配置：一个节点、一个 select 组、一条 MATCH；不开启 TUN，不改系统 DNS。
 mihomo YAML 的 reality-opts 写入 support-x25519mlkem768；已在 Mihomo 1.19.33/1.19.34 对接 Xray 26.11.9 REALITY 的实测中验证为必需，不保证所有客户端组合。
@@ -60,7 +67,7 @@ pull 的 --out 必须是已经存在的目录，命令会把它收紧为仅当�
 `;
 export function parseArguments(args: string[]): SetupOptions {
   const [command, nodeId, ...flags] = args;
-  if (!['setup', 'status', 'export', 'endpoint', 'pull'].includes(command) || !nodeId || nodeId.startsWith('-')) throw new AdoptionError('USAGE');
+  if (!['setup', 'status', 'export', 'endpoint', 'pull', 'add-client'].includes(command) || !nodeId || nodeId.startsWith('-')) throw new AdoptionError('USAGE');
   const options: SetupOptions = { command: command as AdoptionOptions['command'], nodeId, to: 'v2rayn' };
   const seen = new Set<string>();
   for (let i = 0; i < flags.length; i++) {
@@ -73,8 +80,8 @@ export function parseArguments(args: string[]): SetupOptions {
       if (!value || value.startsWith('-')) throw new AdoptionError('OPTION_VALUE_REQUIRED');
       options.dataDir = value;
     }
-    else if (flag === '--plan' && command === 'setup') options.plan = true;
-    else if (flag === '--apply' && command === 'setup') options.apply = true;
+    else if (flag === '--plan' && (command === 'setup' || command === 'add-client')) options.plan = true;
+    else if (flag === '--apply' && (command === 'setup' || command === 'add-client')) options.apply = true;
     else if (flag === '--host' && command === 'endpoint') {
       const value = flags[++i];
       if (!value || !/^[a-zA-Z0-9][a-zA-Z0-9.:_-]*$/.test(value)) throw new AdoptionError('OPTION_VALUE_INVALID');
@@ -94,6 +101,18 @@ export function parseArguments(args: string[]): SetupOptions {
       if (flag === '--reality-target') options.realityTarget = value;
       if (flag === '--version') options.version = value;
     }
+    else if (['--name', '--owner', '--remark', '--inbound'].includes(flag)) {
+      if (command !== 'add-client') throw new AdoptionError('OPTION_NOT_APPLICABLE');
+      const value = flags[++i];
+      if (!value || value.startsWith('-')) throw new AdoptionError('OPTION_VALUE_REQUIRED');
+      if (flag === '--name' && !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(value)) throw new AdoptionError('OPTION_VALUE_INVALID');
+      if (flag === '--inbound' && !/^inbound-[1-9]\d*$/.test(value)) throw new AdoptionError('OPTION_VALUE_INVALID');
+      if ((flag === '--owner' || flag === '--remark') && !isLocalLabel(value)) throw new AdoptionError('OPTION_VALUE_INVALID');
+      if (flag === '--name') options.name = value;
+      if (flag === '--owner') options.ownerLabel = value;
+      if (flag === '--remark') options.remark = value;
+      if (flag === '--inbound') options.inbound = value;
+    }
     else if (['--ssh', '--out', '--client', '--to'].includes(flag)) {
       const value = flags[++i];
       if (!value || value.startsWith('-')) throw new AdoptionError('OPTION_VALUE_REQUIRED');
@@ -111,6 +130,16 @@ export function parseArguments(args: string[]): SetupOptions {
   if (options.plan && options.apply) throw new AdoptionError('CONFLICTING_OPTIONS');
   return options;
 }
+export async function runAddClient(options: SetupOptions, root: string, transport: AdoptionTransport,
+  confirm?: (preview: AdoptionResult) => Promise<boolean>): Promise<AdoptionResult> {
+  if (options.plan) return runAdoption(options, root, transport);
+  if (!options.apply) {
+    const preview = runAdoption({ ...options, plan: true }, root, transport);
+    if (preview.status !== 'planned') return preview;
+    if (!confirm || !await confirm(preview)) throw new AdoptionError('CLIENT_APPROVAL_REQUIRED');
+  }
+  return runAdoption({ ...options, apply: true, plan: false }, root, transport);
+}
 export function renderHumanResult(result: AdoptionResult): string {
   const lines = [
     `${result.nodeId} · ${result.status}`,
@@ -127,6 +156,7 @@ export function renderHumanResult(result: AdoptionResult): string {
       if (file && typeof file === 'object' && 'path' in file && typeof file.path === 'string') lines.push(`私有导出 ${file.path}`);
     }
   } else if (result.outputFile) lines.push(`私有导出 ${result.outputFile}`);
+  if (typeof result.metadataFile === 'string') lines.push(`本地标注 ${result.metadataFile}`);
   if (typeof result.format === 'string') lines.push(`导出格式 ${result.format}`);
   else if (Array.isArray(result.formats)) lines.push(`带回格式 ${result.formats.join(', ')}`);
   if (result.code) lines.push(`原因 ${result.code}`);
@@ -148,6 +178,19 @@ export async function main(args = process.argv.slice(2), env: NodeJS.ProcessEnv 
     const command = applyOperatorSshAlias(options, config);
     const sshFiles = operatorSshFiles(config, command.nodeId);
     const root = resolveStateRoot(programRoot, { dataDir: command.dataDir, configuredDataDir: config?.dataDir, env });
+    const transport = createOpenSshTransport(sshFiles);
+    const confirmAddClient = process.stdin.isTTY && !options.json && !options.plan && !options.apply ? async (preview: AdoptionResult) => {
+      const plan = preview.plan && typeof preview.plan === 'object' ? preview.plan as { action?: string; inbound?: string; client?: string } : {};
+      if (plan.action === 'finish-client') console.log(`上次追加的客户端 ${plan.client ?? ''} 已在服务器上。确认后只补写本地文件，不再新增 UUID。`);
+      else {
+        console.log(`将在 ${plan.inbound ?? ''} 追加客户端 ${plan.client ?? ''}。`);
+        console.log('已有客户端 UUID、端口和 REALITY 参数保持不变，不修改 minClientVer。');
+        console.log('确认后会重启 xray，并把这个客户端的五个文件写到私有目录。终端只打印路径。');
+      }
+      const prompt = createInterface({ input: process.stdin, output: process.stdout });
+      try { return /^y(?:es)?$/i.test((await prompt.question('执行此客户端计划？[y/N] ')).trim()); }
+      finally { prompt.close(); }
+    } : undefined;
     const result = command.command === 'setup' ? await runSetup(command, root, createInstallTransport(sshFiles),
       process.stdin.isTTY && !options.json ? async plan => {
         console.log(`安装 Xray ${plan.version} · 节点 ${plan.nodeId} · TCP ${plan.port} · REALITY ${plan.realityTarget}`);
@@ -155,11 +198,12 @@ export async function main(args = process.argv.slice(2), env: NodeJS.ProcessEnv 
         const prompt = createInterface({ input: process.stdin, output: process.stdout });
         try { return /^y(?:es)?$/i.test((await prompt.question('执行此安装计划？[y/N] ')).trim()); }
         finally { prompt.close(); }
-      } : undefined) : runAdoption(command, root, createOpenSshTransport(sshFiles));
+      } : undefined) : command.command === 'add-client' ? await runAddClient(command, root, transport, confirmAddClient)
+      : runAdoption(command, root, transport);
     if (command.json) console.log(JSON.stringify(result));
     else console.log(renderHumanResult(result));
     return result.code ? (['unknown', 'failed-restored', 'rollback-failed', 'installed-local-state-incomplete',
-      'adopted-local-handoff-failed', 'completed-cleanup-failed', 'cleanup-failed'].includes(result.status) ? 4 : 2) : 0;
+      'adopted-local-handoff-failed', 'client-added-local-handoff-failed', 'completed-cleanup-failed', 'cleanup-failed'].includes(result.status) ? 4 : 2) : 0;
   } catch (error) {
     const failure = error instanceof InstallLayoutError ? new AdoptionError(error.code, 2)
       : error instanceof AdoptionError ? error : new AdoptionError('LOCAL_OR_REMOTE_OPERATION_FAILED', 4);

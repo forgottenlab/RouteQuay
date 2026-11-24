@@ -42,7 +42,7 @@ The template has no password field. `sshAlias` selects an OpenSSH host alias. A 
 
 `ssh.configPath` is the SSH config file passed to OpenSSH. When it is set, both `ssh -G` and the later connection receive `ssh -F` pointed at that file. OpenSSH then uses that file and does not read the system `ssh_config`. Omit `configPath` to leave `-F` unset and keep OpenSSH's default lookup. `identityFile` stores a private-key path, not the key itself. When it is set, the connection adds `ssh -i` and `IdentitiesOnly=yes`, which sets IdentityFile and does not use other keys from ssh-agent. `ssh -G` does not receive `-i` and does not read the key. Omit `identityFile` to leave `-i` unset; OpenSSH then uses the key from the SSH config or from ssh-agent.
 
-Either path may start with `~`. RouteQuay expands it to an absolute path before ssh sees it. The path must be an existing regular file and must not be a symbolic link. On POSIX, the private key must not be readable by group or other users. An empty private key, a private key larger than 32 KiB, or a config file larger than 256 KiB is refused as well. If any of these checks fail, the command stops before it starts ssh, and the terminal shows only the error code. It does not print the key, a password, or the file contents. The template values `~/.ssh/config` and `~/.ssh/id_ed25519_example` are placeholders. Replace them with the operator's own config and key paths, or delete the fields that are not used. RouteQuay does not generate a key and does not write an SSH config. An encrypted key that needs a passphrase prompt fails under `BatchMode=yes`. Load that key into ssh-agent and omit `identityFile`.
+Either path may start with `~`. RouteQuay expands it to an absolute path before ssh sees it. The path must be an existing regular file and must not be a symbolic link. On POSIX, the private key must not be readable by group or other users. An empty private key, a private key larger than 32 KiB, or a config file larger than 256 KiB is refused as well. If any of these checks fail, the command stops before it starts ssh, and the terminal shows only the error code. It does not print the key, a password, or the file contents. The template omits `ssh.configPath`, `knownHostsPath`, and `identityFile`. A file created by `init-config` therefore does not pass an example path to `ssh -F` or `ssh -i`. When an operator needs a config file or a key, they add a path that already exists on their machine. Leave the field out when it is not used. RouteQuay does not generate a key and does not write an SSH config. An encrypted key that needs a passphrase prompt fails under `BatchMode=yes`. Load that key into ssh-agent and omit `identityFile`.
 
 ## Use the command
 
@@ -52,6 +52,7 @@ Open a new terminal after PATH is changed:
 routequay --help
 routequay setup example-node --plan
 routequay status example-node
+routequay add-client example-node --plan
 routequay pull example-node
 ```
 
