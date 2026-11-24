@@ -28,6 +28,7 @@ RouteQuay 是轻量、快捷、安全的网络接入与服务器管理工具，�
 | 导出 Mihomo YAML（`mihomo-provider` 或 `mihomo-profile`） | 2026-11-21：Ubuntu 24.04 与 Debian 13、Xray 26.11.9 上，Mihomo 1.19.33 需要未加引号的 `support-x25519mlkem768: true`。2026-11-23：FlClash 0.9.4 以文件导入直接导入官方 `mihomo-profile`，两台验收节点的延迟测试成功。请导入官方导出，不要使用编辑过的测试副本。不覆盖全部版本组合 |
 | 导出本地 sing-box JSON（`sing-box`） | 2026-11-23：官方导出 JSON 通过 sing-box 1.14.4 的 `sing-box check -c`。对 Xray 26.11.9 的 REALITY 握手失败（`reality verification failed`）。官方 1.14.4 会从 REALITY ClientHello 去掉 `X25519MLKEM768`。同一路径上 Mihomo 1.19.33 使用官方字段 `reality-opts.support-x25519mlkem768: true` 时成功。不要削弱服务器 REALITY、修改 `minClientVer` 或添加非官方字段 |
 | 为一个人或一台设备追加客户端（`add-client`） | 本地测试会在已接管的入站上追加一个客户端 UUID，保留已有客户端和共用的 REALITY 参数，并为这个客户端写下五种文件。不修改 `minClientVer`。终端只打印路径。这次改动没有在真实 SSH 主机上执行 |
+| 本机客户端分组 | 操作员自己起名，把已签发客户端归到本机分组。成员是 `inbound-N-client-N`。`status` 列出分组；`export` / `pull` 可按分组写出每个成员各自的现行文件。不上传，不限制流量或到期，不启停，不删除远程客户端。没有在真实 SSH 主机上执行 |
 | 把客户端文件带回本机（`pull`） | 成功的首次安装，以及本地状态有变化的接管，会自动写到当前数据根；之后也可以再执行 `pull`。五种现行文件是 VLESS URI、二维码 PNG、Mihomo provider、Mihomo profile 和 sing-box JSON。终端只打印路径。带安装标记的安装与未标记的检出使用不同数据根，不会自动迁移。不提供订阅 URL |
 | 显式更新公网地址并保留 SSH 主机身份 | 已实现并测试 |
 | SSH 身份保护、事务恢复和本地状态保护 | 已实现，存在明确使用边界 |
@@ -76,6 +77,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Actio
 # 在已接管节点上只读查看追加一个客户端的计划。确认执行后写五种私有文件，终端只打印路径。
 .\routequay.cmd add-client example-node --plan
 
+# 把已经签发的客户端归到本机分组。名字自己定。终端只打印分组名、ref 和路径。
+.\routequay.cmd group example-node create self
+.\routequay.cmd group example-node add-member self --client inbound-1-client-1
+
 # 导出到受保护的本地文件，不要公开完整 VLESS URI。
 .\routequay.cmd export example-node --to v2rayn
 .\routequay.cmd export example-node --to vless-qr
@@ -107,6 +112,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Actio
 `routequay export <node> --to <格式>` 只把一种文件写到私有目录，终端只打印路径，不打印 URI、YAML、JSON、UUID、密钥或 shortId。`--out` 可指定其他文件路径。内容相同则保留原文件；内容不同则拒绝并返回 `OUTPUT_EXISTS`。
 
 `routequay add-client <node>` 在已经接管的节点上为一个人或一台设备追加客户端。入站继续共用端口和 REALITY 参数。新客户端是一条新记录，之后用 `inbound-N-client-N` 选择。已有客户端的标识保持不变。这条命令不轮换私钥、shortId、服务器名或端口，也不修改 `minClientVer`。`--plan` 只读。非交互执行必须带 `--apply`。`--name` 是写到服务器上的 email，省略时为 `client-N`。`--owner` 和 `--remark` 只作为本地标注，不上传，也不出现在终端输出里。确认执行后会重启 xray，并把这个新客户端的五种文件写到私有数据目录。人类可读输出和 `--json` 只打印路径。
+
+`routequay group <node>` 把已经签发的客户端归到本机分组。分组名由操作员自己决定，例如 self 或 friend-a；程序不内置家人、同学或朋友这类分类。成员只写 `inbound-N-client-N`。文件是当前数据根下的 `local/private/cli-nodes/<node>/groups.local.json`，形状见 [examples/client-groups.example.json](examples/client-groups.example.json)。它和 `clients.local.json` 一样只留在本机：不上传，不出现在服务器配置里，也不执行流量、到期、启停或远程删除。`remove` 只删除这条本地分组。文件不存在表示还没有分组；文件残缺时命令失败，代码是 `GROUP_STORE_INVALID`，并且不改写该文件、也不改远程客户端。`status` 列出分组名和成员 ref。`export` 与 `pull` 可以加 `--group <name>`，为每个成员分别写入现行文件，仍然只打印路径。这不是分组订阅地址，也不会把多个客户端合成一个公开文件。`--owner` 和 `--remark` 继续只写在 `clients.local.json`，终端不打印。
 
 `routequay pull <node>` 复用上述导出器，把五种现行文件写进当前数据根下的 `local/private/cli-nodes/<node>/`：`<ref>.vless.txt`、`<ref>.vless.png`、`<ref>.mihomo-provider.yaml`、`<ref>.mihomo-profile.yaml`、`<ref>.sing-box.json`。多于一个客户端时加上 `--client <ref>`。`--out` 必须是已经存在的目录。成功的首次安装，以及接管时本地状态发生变化，会自动写下同样的五个文件。多个客户端时自动带回不会猜测客户端：接管可以完成，带回失败并返回 `CLIENT_SELECTION_REQUIRED`，此时再执行 `pull --client <ref>`。本地状态没有变化的接管不重写这五个文件。默认的人类可读输出和 `--json` 只打印目标目录和路径，不打印 URI、UUID、密钥或 shortId。`status`、`export` 和 `pull` 使用同一套 `inbound-N-client-N` 引用。
 

@@ -11,6 +11,7 @@ export const runtimeFiles = [
   'packages/core/src/operator-config.ts',
   'packages/core/src/xray-adoption.ts',
   'packages/core/src/xray-client.ts',
+  'packages/core/src/client-groups.ts',
   'packages/core/src/xray-add-client.py',
   'packages/core/src/xray-install.ts',
   'packages/core/src/linux-compatibility.ts',
