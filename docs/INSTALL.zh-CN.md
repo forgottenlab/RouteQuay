@@ -38,7 +38,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Yes -
 
 `routequay init-config` 在文件不存在时，把 `examples/operator-config.example.json` 复制到 `%USERPROFILE%\.routequay\config.json`，并且只打印路径。`init` 是同一命令。已有文件不会被覆盖：命令以退出码 2 结束，标准输出仍然只有该路径。加上 `--json` 时，失败对象的 `code` 是 `OPERATOR_CONFIG_EXISTS`，并带上同一路径，不打印文件内容。数据目录和文件只允许当前用户访问。
 
-模板没有口令字段。`sshAlias` 选择 `%USERPROFILE%\.ssh\config` 里已经存在的 OpenSSH 主机。`host`、`user`、`port` 和 `identityFile` 是可选项；`identityFile` 只保存密钥路径，不保存密钥内容。命令仍用 `ssh -G` 解析别名，并保持 `BatchMode=yes` 和 `StrictHostKeyChecking=yes`。`vpn.example.invalid` 和 `example-user` 只是占位符。
+模板没有口令字段。`sshAlias` 选择 OpenSSH 主机别名。命令没有 `--ssh` 时使用该别名。`host`、`user`、`port`、`knownHostsPath` 和 `authMethod` 仍只作校验和记录，不会变成另一条连接。主机、用户和端口仍来自 `ssh -G`，再由命令行固定。`BatchMode=yes`、`StrictHostKeyChecking=yes`、`ForwardAgent=no` 和 `ClearAllForwardings=yes` 写在命令行上，SSH 配置文件不能把它们改松。`vpn.example.invalid` 和 `example-user` 只是占位符。
+
+`ssh.configPath` 是要传给 OpenSSH 的配置文件路径。写了这一项时，`ssh -G` 和随后的实际连接都会带上 `ssh -F` 指向该文件。OpenSSH 因此使用这个文件，并且不再读取系统级 `ssh_config`。删掉 `configPath` 则不传 `-F`，仍由 OpenSSH 查找默认配置。`identityFile` 只保存私钥路径，不保存私钥内容。写了这一项时，实际连接追加 `ssh -i` 和 `IdentitiesOnly=yes`，用来设置 IdentityFile，并且不使用 ssh-agent 里的其他密钥。`ssh -G` 不带 `-i`，也不会读取私钥内容。删掉 `identityFile` 则不传 `-i`，密钥仍由 SSH 配置或 ssh-agent 提供。
+
+这两个路径都可以用 `~` 开头。RouteQuay 先展开成绝对路径，再传给 ssh。路径必须是已经存在的普通文件，不能是符号链接。POSIX 上私钥文件不能对组或其他用户可读。空的私钥、超过 32 KiB 的私钥，以及超过 256 KiB 的配置文件，也会被拒绝。不满足时，命令在启动 ssh 之前失败，终端只给出错误码，不打印私钥、口令或文件内容。模板里的 `~/.ssh/config` 和 `~/.ssh/id_ed25519_example` 是占位符。请改成自己的配置文件和密钥路径，或者删掉用不到的字段。RouteQuay 不生成密钥，也不写 SSH 配置。需要口令提示的加密私钥会因为 `BatchMode=yes` 无法交互而失败；请先把这把密钥载入 ssh-agent，并省略 `identityFile`。
 
 ## 使用命令
 

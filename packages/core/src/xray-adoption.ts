@@ -18,6 +18,10 @@ export class AdoptionError extends Error {
   constructor(code: string, exitCode = 2) { super(code); this.code = code; this.exitCode = exitCode; }
 }
 export type SshTarget = { alias: string; host: string; port: number; user: string; hostKeyAlias?: string };
+// Paths only. They are not part of the saved connection identity.
+export type SshClientFiles = { configFile?: string; identityFile?: string };
+export const SSH_CONFIG_MAX_BYTES = 256 * 1024;
+export const SSH_IDENTITY_MAX_BYTES = 32 * 1024;
 export type Probe = {
   linux?: LinuxEnvironment;
   loadState: string; service: string; user: string; group: string | null;
@@ -43,31 +47,68 @@ export function parseSshConfig(alias: string, output: string): SshTarget {
       || !Number.isInteger(port) || port < 1 || port > 65535) fail('SSH_TARGET_INVALID');
   return { alias, host, user, port };
 }
-export const openSshTransport: AdoptionTransport = {
-  resolve(alias) {
-    if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(alias)) fail('SSH_ALIAS_INVALID');
-    const result = spawnSync('ssh', ['-G', alias], { encoding: 'utf8', windowsHide: true, timeout: 10000 });
-    if (result.status !== 0) fail('SSH_CONFIG_UNAVAILABLE', 4);
-    return parseSshConfig(alias, result.stdout);
-  },
-  probe(target) {
-    const script = (readFileSync(new URL('./install-preflight.py', import.meta.url), 'utf8') + '\n'
-      + readFileSync(new URL('./xray-adoption-probe.py', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
-    const result = spawnSync('ssh', [...sshTargetArgs(target),
-      'if [ "$(id -u)" = 0 ]; then python3 -B -; elif command -v sudo >/dev/null && sudo -n true 2>/dev/null; then sudo -n env SSH_CONNECTION="$SSH_CONNECTION" python3 -B -; else echo \'{"ok":false,"code":"ROOT_OR_SUDO_REQUIRED"}\'; fi'],
-      { input: script, encoding: 'utf8', windowsHide: true, timeout: 45000, maxBuffer: 4 * 1024 * 1024 });
-    if (result.status !== 0) fail(/Permission denied/i.test(result.stderr ?? '') ? 'SSH_AUTH_FAILED' : 'SSH_UNAVAILABLE', 4);
-    let body;
-    try { body = JSON.parse(result.stdout); } catch { fail('REMOTE_RESPONSE_INVALID', 4); }
-    if (!body.ok) fail(body.code === 'ROOT_OR_SUDO_REQUIRED' ? 'ROOT_OR_SUDO_REQUIRED' : 'REMOTE_LAYOUT_OR_PERMISSION_UNAVAILABLE', 4);
-    return body.probe;
-  }
-};
-export function sshTargetArgs(target: SshTarget): string[] {
-  return ['-T', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
+function assertSshOperand(path: string | undefined, code: string, maxBytes: number, allowEmpty: boolean): void {
+  if (path === undefined) return;
+  if (typeof path !== 'string' || path.length < 1 || path.length > 240 || path !== path.trim() || path.startsWith('-')
+      || /[\u0000-\u001f]/.test(path) || path.includes('://')) fail(code, 4);
+  let stat;
+  try { stat = lstatSync(path); }
+  catch { fail(code, 4); }
+  if (stat.isSymbolicLink() || !stat.isFile()) fail(code, 4);
+  if (stat.size > maxBytes || (!allowEmpty && stat.size < 1)) fail(code, 4);
+  if (code === 'SSH_IDENTITY_UNAVAILABLE' && process.platform !== 'win32' && (stat.mode & 0o077) !== 0) fail(code, 4);
+}
+// Stat only. File bytes are never read, returned, or logged.
+export function assertSshClientFiles(files: SshClientFiles = {}): void {
+  assertSshOperand(files.configFile, 'SSH_CONFIG_UNAVAILABLE', SSH_CONFIG_MAX_BYTES, true);
+  assertSshOperand(files.identityFile, 'SSH_IDENTITY_UNAVAILABLE', SSH_IDENTITY_MAX_BYTES, false);
+}
+export function sshResolveArgs(alias: string, files: SshClientFiles = {}): string[] {
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(alias)) fail('SSH_ALIAS_INVALID');
+  return [...(files.configFile ? ['-F', files.configFile] : []), '-G', alias];
+}
+export function prepareSshResolve(alias: string, files: SshClientFiles = {}): string[] {
+  const args = sshResolveArgs(alias, files);
+  assertSshClientFiles(files);
+  return args;
+}
+export function createOpenSshTransport(files: SshClientFiles = {}): AdoptionTransport {
+  return {
+    resolve(alias) {
+      const args = prepareSshResolve(alias, files);
+      const result = spawnSync('ssh', args, { encoding: 'utf8', windowsHide: true, timeout: 10000 });
+      if (result.status !== 0) fail('SSH_CONFIG_UNAVAILABLE', 4);
+      return parseSshConfig(alias, result.stdout);
+    },
+    probe(target) {
+      const script = (readFileSync(new URL('./install-preflight.py', import.meta.url), 'utf8') + '\n'
+        + readFileSync(new URL('./xray-adoption-probe.py', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+      const result = spawnSync('ssh', [...prepareSshConnect(target, files),
+        'if [ "$(id -u)" = 0 ]; then python3 -B -; elif command -v sudo >/dev/null && sudo -n true 2>/dev/null; then sudo -n env SSH_CONNECTION="$SSH_CONNECTION" python3 -B -; else echo \'{"ok":false,"code":"ROOT_OR_SUDO_REQUIRED"}\'; fi'],
+        { input: script, encoding: 'utf8', windowsHide: true, timeout: 45000, maxBuffer: 4 * 1024 * 1024 });
+      if (result.status !== 0) fail(/Permission denied/i.test(result.stderr ?? '') ? 'SSH_AUTH_FAILED' : 'SSH_UNAVAILABLE', 4);
+      let body;
+      try { body = JSON.parse(result.stdout); } catch { fail('REMOTE_RESPONSE_INVALID', 4); }
+      if (!body.ok) fail(body.code === 'ROOT_OR_SUDO_REQUIRED' ? 'ROOT_OR_SUDO_REQUIRED' : 'REMOTE_LAYOUT_OR_PERMISSION_UNAVAILABLE', 4);
+      return body.probe;
+    }
+  };
+}
+export const openSshTransport = createOpenSshTransport();
+// Command-line safety options are applied after -F, so the selected SSH config cannot relax them.
+// -i sets IdentityFile as its own argument. The path is not saved on the adopted target.
+export function sshTargetArgs(target: SshTarget, files: SshClientFiles = {}): string[] {
+  return [...(files.configFile ? ['-F', files.configFile] : []),
+    ...(files.identityFile ? ['-i', files.identityFile] : []),
+    '-T', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
     '-o', 'ForwardAgent=no', '-o', 'ClearAllForwardings=yes', '-o', 'ConnectTimeout=10',
+    ...(files.identityFile ? ['-o', 'IdentitiesOnly=yes'] : []),
     ...(target.hostKeyAlias ? ['-o', `HostKeyAlias=${target.hostKeyAlias}`, '-o', 'UpdateHostKeys=no'] : []),
     '-o', `HostName=${target.host}`, '-p', String(target.port), '-l', target.user, target.alias];
+}
+export function prepareSshConnect(target: SshTarget, files: SshClientFiles = {}): string[] {
+  assertSshClientFiles(files);
+  return sshTargetArgs(target, files);
 }
 
 // Files are protected before secret content is created. Existing symlinks are refused.

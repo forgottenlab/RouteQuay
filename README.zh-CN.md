@@ -57,6 +57,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Actio
 
 当前已验证的 Windows 管理端流程依赖可用的 OpenSSH 客户端、配置好的 SSH Host 别名、密钥认证及可信主机密钥记录；远端 Linux 还需通过工具的环境与权限检查。
 
+操作员配置里的 `ssh.configPath` 会作为 `ssh -F` 传给 `ssh -G` 和实际连接。节点的 `identityFile` 只写密钥路径，连接时作为 `ssh -i` 传入，并带上 `IdentitiesOnly=yes`。省略这两项时，仍使用 OpenSSH 的默认配置查找和密钥选择。`BatchMode=yes` 与 `StrictHostKeyChecking=yes` 始终由命令行固定。写法见[安装说明](docs/INSTALL.zh-CN.md)。
+
 已验证的管理端为 Windows / PowerShell / OpenSSH。远端首装实机范围是 Debian 13、Ubuntu 24.04 的 x86_64；aarch64 仅有本地选型测试。远端需要 systemd、root 或非交互 sudo、Python 3、curl、OpenSSL 及安装器检查的既有工具；缺失时停止，不自动安装软件包。
 
 ## 🖥️ 命令示例

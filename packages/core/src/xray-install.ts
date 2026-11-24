@@ -4,8 +4,8 @@ import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { connect } from 'node:net';
 import { supportsFirstInstallPlatform, type LinuxEnvironment } from './linux-compatibility.ts';
-import { AdoptionError, openSshTransport, privateDirectory, privateWrite, runAdoption, sshTargetArgs, verifiedAdoptedTarget,
-  type AdoptionOptions, type AdoptionResult, type AdoptionTransport, type Probe, type SshTarget } from './xray-adoption.ts';
+import { AdoptionError, createOpenSshTransport, prepareSshConnect, privateDirectory, privateWrite, runAdoption, verifiedAdoptedTarget,
+  type AdoptionOptions, type AdoptionResult, type AdoptionTransport, type Probe, type SshClientFiles, type SshTarget } from './xray-adoption.ts';
 
 // Digests retrieved from the official tagged GitHub release API, 2026-11-16.
 export const xrayRelease = { version: '26.11.9', assets: {
@@ -28,22 +28,25 @@ export interface InstallTransport extends AdoptionTransport {
   execute(target: SshTarget, script: string): { status: number | null; stdout: string };
   receipt(target: SshTarget, id: string): string;
 }
-export const installTransport: InstallTransport = {
-  ...openSshTransport,
-  execute(target, script) {
-    const result = spawnSync('ssh', [...sshTargetArgs(target),
-      'if [ "$(id -u)" = 0 ]; then bash -s; else sudo -n env SSH_CONNECTION="$SSH_CONNECTION" bash -s; fi'],
-      { input: script, encoding: 'utf8', windowsHide: true, timeout: 240000, maxBuffer: 1024 * 1024 });
-    // Only the fixed result marker is interpreted. Never return raw shell errors.
-    return { status: result.status, stdout: result.stdout ?? '' };
-  },
-  receipt(target, id) {
-    if (!/^[a-f0-9]{32}$/.test(id)) throw new AdoptionError('TRANSACTION_ID_INVALID');
-    const script = `p=/var/backups/vpn-control-plane-${id}; check() { if [ "$(id -u)" = 0 ]; then test "$@"; else sudo -n test "$@"; fi; }; if check -f "$p/installed"; then echo installed; elif check -f "$p/recovered"; then echo recovered; elif check -d "$p"; then echo pending; else echo absent; fi`;
-    const result = spawnSync('ssh', [...sshTargetArgs(target), script], { encoding: 'utf8', timeout: 15000, windowsHide: true });
-    return result.status === 0 ? result.stdout.trim() : 'unknown';
-  }
-};
+export function createInstallTransport(files: SshClientFiles = {}): InstallTransport {
+  return {
+    ...createOpenSshTransport(files),
+    execute(target, script) {
+      const result = spawnSync('ssh', [...prepareSshConnect(target, files),
+        'if [ "$(id -u)" = 0 ]; then bash -s; else sudo -n env SSH_CONNECTION="$SSH_CONNECTION" bash -s; fi'],
+        { input: script, encoding: 'utf8', windowsHide: true, timeout: 240000, maxBuffer: 1024 * 1024 });
+      // Only the fixed result marker is interpreted. Never return raw shell errors.
+      return { status: result.status, stdout: result.stdout ?? '' };
+    },
+    receipt(target, id) {
+      if (!/^[a-f0-9]{32}$/.test(id)) throw new AdoptionError('TRANSACTION_ID_INVALID');
+      const script = `p=/var/backups/vpn-control-plane-${id}; check() { if [ "$(id -u)" = 0 ]; then test "$@"; else sudo -n test "$@"; fi; }; if check -f "$p/installed"; then echo installed; elif check -f "$p/recovered"; then echo recovered; elif check -d "$p"; then echo pending; else echo absent; fi`;
+      const result = spawnSync('ssh', [...prepareSshConnect(target, files), script], { encoding: 'utf8', timeout: 15000, windowsHide: true });
+      return result.status === 0 ? result.stdout.trim() : 'unknown';
+    }
+  };
+}
+export const installTransport = createInstallTransport();
 function bringBackAfterAdopt(adopted: AdoptionResult, options: SetupOptions, root: string,
   transport: InstallTransport): AdoptionResult {
   try {

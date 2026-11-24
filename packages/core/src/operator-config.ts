@@ -1,7 +1,7 @@
 import { lstatSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { AdoptionError, privateWrite } from './xray-adoption.ts';
+import { AdoptionError, privateWrite, type SshClientFiles } from './xray-adoption.ts';
 import { defaultUserDataDir, expandUserPath } from './install-layout.ts';
 
 export const OPERATOR_SCHEMA = 'routequay-operator-config-v1';
@@ -179,6 +179,23 @@ export function initOperatorConfig(programRoot: string, configPath: string): str
     throw error;
   }
   return configPath;
+}
+
+function sshOperandPath(value: string, home: string): string {
+  if (value !== value.trim() || value.startsWith('-')) invalid();
+  const absolute = resolve(expandUserPath(value, home));
+  if (absolute.length > 240 || absolute.startsWith('-') || /[\u0000-\u001f]/.test(absolute) || absolute.includes('://')) invalid();
+  return absolute;
+}
+
+// Expands paths only. Existence is checked later, at the SSH spawn boundary.
+export function operatorSshFiles(config: OperatorConfig | null, nodeId: string, home = homedir()): SshClientFiles {
+  if (!config) return {};
+  const files: SshClientFiles = {};
+  if (config.ssh?.configPath) files.configFile = sshOperandPath(config.ssh.configPath, home);
+  const identityFile = config.nodes.find(node => node.id === nodeId)?.identityFile;
+  if (identityFile) files.identityFile = sshOperandPath(identityFile, home);
+  return files;
 }
 
 export function applyOperatorSshAlias<T extends { nodeId: string; ssh?: string }>(options: T, config: OperatorConfig | null): T & { ssh?: string } {
