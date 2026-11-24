@@ -27,6 +27,7 @@ Several mature networking and Xray management projects already exist. RouteQuay 
 | Export a local VLESS QR PNG (`vless-qr`) | Offline decode in unit tests; 2026-11-21 v2rayN GUI image import succeeded on the two recorded nodes. 2026-11-23: Shadowrocket imported the same clipboard `vless://` URI used for v2rayN paste, and scanned the offline VLESS QR. Import only; no traffic or egress result |
 | Export Mihomo YAML (`mihomo-provider` or `mihomo-profile`) | 2026-11-21: on Ubuntu 24.04 and Debian 13 with Xray 26.11.9, Mihomo 1.19.33 required unquoted `support-x25519mlkem768: true`. 2026-11-23: FlClash 0.9.4 imported the official `mihomo-profile` YAML by file import, and delay tests succeeded on both acceptance nodes. Import the official export, not an edited test copy. Not every version pair |
 | Export a local sing-box JSON profile (`sing-box`) | 2026-11-23: the official exported JSON passed sing-box 1.14.4 `sing-box check -c`. The REALITY handshake to Xray 26.11.9 failed with `reality verification failed`. Official 1.14.4 strips `X25519MLKEM768` from the REALITY ClientHello. On the same path, Mihomo 1.19.33 with official `reality-opts.support-x25519mlkem768: true` succeeded. Do not weaken server REALITY, change `minClientVer`, or add unofficial sing-box JSON fields |
+| Bring client files back to this machine (`pull`) | After a successful install or adoption, and whenever `pull` is run later. Writes a VLESS URI file, a QR PNG, Mihomo YAML, and sing-box JSON into the operator's private directory. The terminal prints paths only. There is no subscription URL |
 | Explicitly update a server endpoint while preserving SSH host identity | Implemented and tested |
 | SSH identity checks, transaction recovery, local state protection | Implemented; see limitations |
 | Web management UI and broader network management | Experimental; **not part of the first stable scope** |
@@ -73,6 +74,9 @@ Run commands from the project checkout using PowerShell, or from any new termina
 
 # sing-box: one local JSON file. Import that file; there is no subscription URL.
 .\routequay.cmd export example-node --to sing-box
+
+# Write all five current files into the local private directory. The terminal prints paths only.
+.\routequay.cmd pull example-node
 ```
 
 After reviewing a clean-host plan, `routequay setup example-node --apply` explicitly approves installation. An existing host may instead be adopted. Read the planned operation and backup/restore information before approving changes.
@@ -88,7 +92,13 @@ This does **not** authorize a new SSH server identity. Strict host-key validatio
 
 ## Client export
 
-`routequay export <node> --to <format>` writes a private file and prints the path only. It does not print the URI, YAML, JSON, UUID, REALITY public key, or short ID. `--out` chooses another path. The same bytes are left in place; different bytes are refused with `OUTPUT_EXISTS`.
+`routequay export <node> --to <format>` writes one private file and prints the path only. It does not print the URI, YAML, JSON, UUID, REALITY public key, or short ID. `--out` chooses another file path. The same bytes are left in place; different bytes are refused with `OUTPUT_EXISTS`.
+
+`routequay pull <node>` uses those same exporters to write the VLESS URI (`.vless.txt`), the VLESS QR PNG, the Mihomo provider, the Mihomo profile, and the sing-box JSON together on this machine. A successful first install does this automatically, as does adoption of an existing instance when the saved state changes. An unchanged setup leaves the files alone. The terminal and `--json` print the directory and paths only.
+
+The default directory is `local/private/cli-nodes/<node>/` under the private data directory. An uninstalled checkout still uses `local/private` inside the repository. An installed copy uses `%USERPROFILE%\.routequay\`, or `--data-dir` / `ROUTEQUAY_DATA_DIR`. Old checkout data is not migrated.
+
+`pull` overwrites the canonical files in that directory: identical bytes stay in place and permissions are tightened again; different bytes are replaced. Symbolic links are refused. If permissions cannot be tightened, the command fails instead of leaving credentials in a looser file. `pull --out` must be an existing directory, and that directory is tightened to the current user. Copies made with `export --out` are not modified by `pull`. `endpoint` does not change existing files; run `pull` when the current files should use the new address. More than one client requires `--client <ref>`.
 
 | `--to` | Default file | When to use it |
 |---|---|---|

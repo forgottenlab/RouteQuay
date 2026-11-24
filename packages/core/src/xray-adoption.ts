@@ -3,7 +3,7 @@ import { createHash, createPrivateKey, createPublicKey, randomUUID } from 'node:
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { clientConnectionSpec, defaultExportFileName, isExportFormat, validateClientExportFields } from '../../exporters/src/client-connection.ts';
+import { clientConnectionSpec, defaultExportFileName, exportFormats, isExportFormat, validateClientExportFields, type ExportFormat } from '../../exporters/src/client-connection.ts';
 import { renderClientExport } from '../../exporters/src/mihomo-yaml.ts';
 import { renderVlessQrPng } from '../../exporters/src/vless-qr.ts';
 
@@ -129,6 +129,48 @@ function commitExportFile(directory: string, output: string, body: ExportBody, c
   exclusiveExport(output, body);
   return 'exported';
 }
+// Canonical bring-back files are the current local copies. Identical bytes stay
+// in place and are re-protected. Different bytes are replaced. Symlinks are refused.
+function replacePrivateFile(path: string, body: ExportBody): void {
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  const backup = `${path}.${randomUUID()}.bak`;
+  try {
+    exclusiveExport(temporary, body);
+    if (process.platform === 'win32') {
+      renameSync(path, backup);
+      try { renameSync(temporary, path); }
+      catch {
+        try { if (!existsSync(path) && existsSync(backup)) renameSync(backup, path); } catch { /* Keep the backup if restore fails. */ }
+        storageFailure('state-commit');
+      }
+      if (existsSync(backup)) unlinkSync(backup);
+    } else renameSync(temporary, path);
+    protectPrivatePath(path, false);
+  } finally { if (existsSync(temporary)) unlinkSync(temporary); }
+}
+function commitBringBackFile(output: string, body: ExportBody): 'unchanged' | 'exported' {
+  assertNoLinks(output);
+  if (existsSync(output)) {
+    const current = lstatSync(output);
+    if (current.isSymbolicLink() || !current.isFile()) fail('PRIVATE_PATH_UNSAFE');
+    if (exportBodiesEqual(readFileSync(output), body)) {
+      protectPrivatePath(output, false);
+      return 'unchanged';
+    }
+    replacePrivateFile(output, body);
+    return 'exported';
+  }
+  exclusiveExport(output, body);
+  return 'exported';
+}
+function exportFormatLabel(format: ExportFormat): string {
+  if (format === 'v2rayn') return 'vless-uri';
+  if (format === 'vless-qr') return 'vless-qr-png';
+  return format;
+}
+function renderExportBody(format: ExportFormat, spec: Parameters<typeof renderClientExport>[1]): ExportBody {
+  return format === 'vless-qr' ? renderVlessQrPng(spec) : renderClientExport(format, spec);
+}
 export function privateWrite(path: string, data: string, replace = false): void {
   privateDirectory(dirname(path));
   if (existsSync(path) && (!replace || lstatSync(path).isSymbolicLink())) fail('OUTPUT_EXISTS');
@@ -145,7 +187,7 @@ export function privateWrite(path: string, data: string, replace = false): void 
   } finally { if (existsSync(temporary)) unlinkSync(temporary); }
 }
 type State = { schemaVersion: string; nodeId: string; target: SshTarget; hash: string; probe: Probe };
-export type AdoptionOptions = { command: 'setup' | 'status' | 'export' | 'endpoint'; nodeId: string; ssh?: string;
+export type AdoptionOptions = { command: 'setup' | 'status' | 'export' | 'endpoint' | 'pull'; nodeId: string; ssh?: string;
   expectedHost?: string; plan?: boolean; json?: boolean; out?: string; client?: string; to?: string; dataDir?: string };
 export type AdoptionResult = { schemaVersion: string; nodeId: string; operation: string; status: string;
   changed: boolean; checkedAt: string; [key: string]: unknown };
@@ -222,7 +264,7 @@ export function verifiedAdoptedTarget(nodeId: string, root: string, resolved: Ss
 }
 
 export function runAdoption(options: AdoptionOptions, root = '.', transport = openSshTransport): AdoptionResult {
-  if (options.command === 'export') {
+  if (options.command === 'export' || options.command === 'pull') {
     if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(options.nodeId)) fail('NODE_ID_INVALID');
     const directory = resolve(root, 'local/private/cli-nodes', options.nodeId);
     if (!existsSync(join(directory, 'state.local.json'))) fail('SETUP_REQUIRED');
@@ -233,9 +275,9 @@ export function runAdoption(options: AdoptionOptions, root = '.', transport = op
 
 function runAdoptionLocked(options: AdoptionOptions, root: string, transport: AdoptionTransport): AdoptionResult {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(options.nodeId)) fail('NODE_ID_INVALID');
-  if (options.command !== 'export') {
-    if (options.to && options.to !== 'v2rayn') fail('EXPORT_FORMAT_UNSUPPORTED');
-  } else if (options.to && !isExportFormat(options.to)) fail('EXPORT_FORMAT_UNSUPPORTED');
+  if (options.command === 'export') {
+    if (options.to && !isExportFormat(options.to)) fail('EXPORT_FORMAT_UNSUPPORTED');
+  } else if (options.command !== 'pull' && options.to && options.to !== 'v2rayn') fail('EXPORT_FORMAT_UNSUPPORTED');
   const directory = resolve(root, 'local/private/cli-nodes', options.nodeId);
   const statePath = join(directory, 'state.local.json');
   assertNoLinks(statePath);
@@ -341,17 +383,39 @@ function runAdoptionLocked(options: AdoptionOptions, root: string, transport: Ad
     publicKey, network: fields.network, flow: fields.flow, serverName: fields.serverName, shortId: fields.shortId,
     encryption: fields.encryption
   });
-  const body: ExportBody = exportFormat === 'vless-qr'
-    ? renderVlessQrPng(spec)
-    : renderClientExport(exportFormat, spec);
-  const output = resolve(options.out ?? join(directory, defaultExportFileName(selected.ref, exportFormat)));
   if (readFileSync(statePath, 'utf8') !== originalState) fail('LOCAL_STATE_CHANGED', 3);
   if (!sameConnection(transport.resolve(target.alias), resolved)) fail('SSH_TARGET_CHANGED', 3);
+  if (options.command === 'pull') {
+    const targetDirectory = options.out ? resolve(options.out) : directory;
+    if (options.out) {
+      assertNoLinks(targetDirectory);
+      if (!existsSync(targetDirectory)) fail('OUTPUT_DIRECTORY_MISSING');
+      const current = lstatSync(targetDirectory);
+      if (current.isSymbolicLink() || !current.isDirectory()) fail('PRIVATE_PATH_UNSAFE');
+    }
+    privateDirectory(targetDirectory);
+    const planned = exportFormats.map(format => ({
+      format,
+      output: resolve(join(targetDirectory, defaultExportFileName(selected.ref, format))),
+      body: renderExportBody(format, spec)
+    }));
+    for (const file of planned) assertNoLinks(file.output);
+    const outputFiles = planned.map(file => ({
+      format: exportFormatLabel(file.format),
+      path: file.output,
+      status: commitBringBackFile(file.output, file.body)
+    }));
+    const outputFile = outputFiles.find(file => file.format === 'vless-uri')?.path;
+    const changed = outputFiles.some(file => file.status === 'exported');
+    return { ...result, status: changed ? 'exported' : 'unchanged', changed, outputFile, outputFiles,
+      outputDirectory: targetDirectory, client: selected.ref, formats: outputFiles.map(file => file.format),
+      fingerprint: 'chrome' };
+  }
+  const body = renderExportBody(exportFormat, spec);
+  const output = resolve(options.out ?? join(directory, defaultExportFileName(selected.ref, exportFormat)));
   const wrote = commitExportFile(directory, output, body, Boolean(options.out));
-  const formatLabel = exportFormat === 'v2rayn' ? 'vless-uri'
-    : exportFormat === 'vless-qr' ? 'vless-qr-png' : exportFormat;
   return { ...result, status: wrote, changed: wrote === 'exported', outputFile: output, client: selected.ref,
-    format: formatLabel, fingerprint: 'chrome' };
+    format: exportFormatLabel(exportFormat), fingerprint: 'chrome' };
 }
 export function realityPublicKey(value: unknown): string {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(value)) fail('REALITY_PRIVATE_KEY_INVALID');

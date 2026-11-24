@@ -4,8 +4,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, existsSync, mkdirSync, writeFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { generateKeyPairSync } from 'node:crypto';
+import { join, sep } from 'node:path';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { parseArguments, renderHumanResult } from '../src/vpncp.ts';
 import { AdoptionError, parseSshConfig, runAdoption, realityPublicKey, privateDirectory, sshTargetArgs, type Probe, type AdoptionTransport } from '../../../packages/core/src/xray-adoption.ts';
@@ -40,6 +40,9 @@ test('default parameters, explicit overrides, unknown and duplicate flags', () =
   assert.equal(parseArguments(['export', 'node-a', '--to', 'mihomo-profile']).to, 'mihomo-profile');
   assert.equal(parseArguments(['export', 'node-a', '--to', 'vless-qr']).to, 'vless-qr');
   assert.equal(parseArguments(['export', 'node-a', '--to', 'sing-box']).to, 'sing-box');
+  assert.equal(parseArguments(['pull', 'node-a', '--client', 'inbound-1-client-1', '--out', 'out-dir']).command, 'pull');
+  assert.equal(parseArguments(['pull', 'node-a', '--client', 'inbound-1-client-1', '--out', 'out-dir']).out, 'out-dir');
+  rejects(() => parseArguments(['pull', 'node-a', '--to', 'v2rayn']), 'OPTION_NOT_APPLICABLE');
   rejects(() => parseArguments(['export', 'node-a', '--to', 'clash']), 'EXPORT_FORMAT_UNSUPPORTED');
   rejects(() => parseArguments(['export', 'node-a', '--to', 'bad']), 'EXPORT_FORMAT_UNSUPPORTED');
   rejects(() => parseArguments(['status', 'a', '--plan']), 'UNKNOWN_OPTION');
@@ -476,4 +479,93 @@ test('IPv6 export host is bracketed in the URI and quoted in YAML', () => {
   assert.equal(JSON.parse(readFileSync(singBox.outputFile as string, 'utf8')).outbounds[0].server, '2001:db8::10');
   assert.equal(JSON.stringify(yaml).includes('2001:db8::10'), false);
   assert.equal(JSON.stringify(singBox).includes('2001:db8::10'), false);
+});
+test('pull writes every local artifact into the temp data dir and overwrites different canonical bytes', () => {
+  const f = fixture();
+  runAdoption({ command: 'setup', nodeId: 'a' }, f.root, f.transport);
+  const result = runAdoption({ command: 'pull', nodeId: 'a' }, f.root, f.transport);
+  const directory = join(f.root, 'local/private/cli-nodes/a');
+  assert.equal(result.status, 'exported');
+  assert.equal(result.outputDirectory, directory);
+  assert.equal(String(result.outputDirectory).startsWith(f.root), true);
+  const files = result.outputFiles as { format: string; path: string; status: string }[];
+  assert.deepEqual(files.map(file => file.format), ['vless-uri', 'vless-qr-png', 'mihomo-provider', 'mihomo-profile', 'sing-box']);
+  assert.deepEqual(files.map(file => file.status), ['exported', 'exported', 'exported', 'exported', 'exported']);
+  assert.deepEqual(files.map(file => file.path.slice(directory.length + 1)), [
+    'inbound-1-client-1.vless.txt', 'inbound-1-client-1.vless.png', 'inbound-1-client-1.mihomo-provider.yaml',
+    'inbound-1-client-1.mihomo-profile.yaml', 'inbound-1-client-1.sing-box.json'
+  ]);
+  assert.equal(readFileSync(files[1].path).subarray(0, 8).toString('binary'), '\x89PNG\r\n\x1a\n');
+  const provider = readFileSync(files[2].path, 'utf8');
+  assert.match(provider, /support-x25519mlkem768: true/);
+  assert.equal(provider.includes('vless://'), false);
+  const singBox = JSON.parse(readFileSync(files[4].path, 'utf8'));
+  assert.equal(singBox.outbounds[0].type, 'vless');
+  assert.equal(singBox.outbounds[0].packet_encoding, '');
+  assert.equal(readFileSync(files[4].path, 'utf8').includes('vless://'), false);
+  const human = renderHumanResult(result);
+  const json = JSON.stringify(result);
+  const publicKey = keys.publicKey.export({ format: 'der', type: 'spki' }).subarray(-32).toString('base64url');
+  for (const secret of [uuid, privateKey, publicKey, 'abcdef12', 'vless://']) {
+    assert.equal(json.includes(secret), false, secret);
+    assert.equal(human.includes(secret), false, secret);
+  }
+  assert.equal(human.includes(`私有目录 ${directory}`), true);
+  for (const file of files) assert.equal(human.includes(file.path), true);
+  if (process.platform !== 'win32') {
+    assert.equal(statSync(directory).mode & 0o777, 0o700);
+    for (const file of files) assert.equal(statSync(file.path).mode & 0o777, 0o600);
+    fs.chmodSync(files[0].path, 0o644);
+  }
+  const again = runAdoption({ command: 'pull', nodeId: 'a' }, f.root, f.transport);
+  assert.equal(again.status, 'unchanged');
+  assert.equal(again.changed, false);
+  if (process.platform !== 'win32') assert.equal(statSync(files[0].path).mode & 0o777, 0o600);
+  const digest = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
+  const originalUri = digest(files[0].path);
+  const originalProvider = digest(files[2].path);
+  writeFileSync(files[0].path, 'sentinel-not-a-secret\n');
+  writeFileSync(files[2].path, 'sentinel-not-a-secret\n');
+  const replaced = runAdoption({ command: 'pull', nodeId: 'a' }, f.root, f.transport);
+  assert.equal(replaced.changed, true);
+  assert.equal(readFileSync(files[0].path, 'utf8').includes('sentinel-not-a-secret'), false);
+  assert.equal(readFileSync(files[2].path, 'utf8').includes('sentinel-not-a-secret'), false);
+  assert.equal(digest(files[0].path), originalUri);
+  assert.equal(digest(files[2].path), originalProvider);
+  if (process.platform !== 'win32') assert.equal(statSync(files[0].path).mode & 0o777, 0o600);
+  writeFileSync(files[0].path, 'sentinel-not-a-secret\n');
+  rejects(() => runAdoption({ command: 'export', nodeId: 'a', to: 'v2rayn' }, f.root, f.transport), 'OUTPUT_EXISTS');
+  assert.equal(readFileSync(files[0].path, 'utf8'), 'sentinel-not-a-secret\n');
+  writeFileSync(files[2].path, 'sentinel-not-a-secret\n');
+  fs.unlinkSync(files[0].path);
+  fs.symlinkSync(files[3].path, files[0].path);
+  rejects(() => runAdoption({ command: 'pull', nodeId: 'a' }, f.root, f.transport), 'PRIVATE_PATH_UNSAFE');
+  assert.equal(fs.lstatSync(files[0].path).isSymbolicLink(), true);
+  assert.equal(readFileSync(files[2].path, 'utf8'), 'sentinel-not-a-secret\n');
+  const missing = join(f.root, 'missing-out');
+  rejects(() => runAdoption({ command: 'pull', nodeId: 'a', out: missing }, f.root, f.transport), 'OUTPUT_DIRECTORY_MISSING');
+  assert.equal(existsSync(missing), false);
+  fs.unlinkSync(files[0].path);
+  const custom = join(f.root, 'custom-out');
+  mkdirSync(custom);
+  const customResult = runAdoption({ command: 'pull', nodeId: 'a', out: custom }, f.root, f.transport);
+  const customFiles = customResult.outputFiles as { path: string }[];
+  assert.equal(customResult.outputDirectory, custom);
+  assert.equal(customFiles.every(file => file.path.startsWith(custom + sep)), true);
+  assert.equal(existsSync(join(directory, 'inbound-1-client-1.vless.txt')), false);
+  if (process.platform !== 'win32') {
+    assert.equal(statSync(custom).mode & 0o777, 0o700);
+    for (const file of customFiles) assert.equal(statSync(file.path).mode & 0o777, 0o600);
+  }
+  const humanCustom = renderHumanResult(customResult);
+  assert.equal(humanCustom.includes('vless://'), false);
+  assert.equal(humanCustom.includes(uuid), false);
+  const multi = fixture();
+  multi.probe.config.inbounds[0].settings.clients.push({ id: '22222222-2222-4222-8222-222222222222' });
+  runAdoption({ command: 'setup', nodeId: 'a' }, multi.root, multi.transport);
+  rejects(() => runAdoption({ command: 'pull', nodeId: 'a' }, multi.root, multi.transport), 'CLIENT_SELECTION_REQUIRED');
+  const chosen = runAdoption({ command: 'pull', nodeId: 'a', client: 'inbound-1-client-2' }, multi.root, multi.transport);
+  assert.match(String(chosen.outputFile), /inbound-1-client-2\.vless\.txt$/);
+  assert.equal(JSON.stringify(chosen).includes('22222222-2222-4222-8222-222222222222'), false);
+  assert.equal(renderHumanResult(chosen).includes('22222222-2222-4222-8222-222222222222'), false);
 });

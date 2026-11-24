@@ -15,6 +15,7 @@ export const help = `routequay — 通过 OpenSSH 接管现有 Xray
   routequay status <node> [--ssh <Host>] [--json]
   routequay endpoint <node> --host <new-host> [--json]
   routequay export <node> --to v2rayn|vless-qr|mihomo-provider|mihomo-profile|sing-box [--client <ref>] [--out <path>] [--json]
+  routequay pull <node> [--ssh <Host>] [--client <ref>] [--out <目录>] [--json]
   routequay init-config
 
 默认 SSH Host 与 node 同名；接管后复用已保存的 Host。
@@ -29,8 +30,15 @@ setup 接管已有实例；干净 Debian 13 / Ubuntu 24.04 LTS 可安装固定 X
 安装参数仅用于空机，已有实例保留原配置与身份。
 REALITY 默认 www.cloudflare.com:443，执行前验证 TLS1.3 与证书，失败则停止。
 endpoint 仅显式更新已接管节点的连接地址；使用原地址的可信 SSH 主机密钥，要求配置及运行状态一致。
-更新后 export --out <新文件路径>，保留旧导出；不改 SSH 配置和历史安装日志。
-export 写入私有文件，不在终端显示 URI、YAML、JSON、UUID、公钥或 shortId。
+endpoint 不改已有本地文件，也不改 SSH 配置和历史安装日志。
+需要新地址的现行文件时再执行 pull。pull 会覆盖节点目录里的同名现行文件。
+若要留下旧地址副本，请先把文件复制出去，或使用 export --out 写到其他路径；pull 不改那些路径。
+export 写入一种私有文件，不在终端显示 URI、YAML、JSON、UUID、公钥或 shortId。
+pull 一次写回五种现行文件：VLESS URI、VLESS 二维码 PNG、Mihomo provider、Mihomo profile、sing-box JSON。终端只打印目录和路径。
+成功的空机安装，以及接管已有实例且本地状态发生变化时，会自动做同样的带回。状态未变化时不改这些文件。
+pull 的同名现行文件：内容相同则保留并重新收紧权限；内容不同则覆盖。符号链接直接拒绝。
+单次 export 在内容不同时仍拒绝并返回 OUTPUT_EXISTS。export 本身不会覆盖已有文件。
+多客户端时 pull 与 export 都要用 status 返回的 ref 选择。自动带回也不会猜测客户端；此时请再执行 pull --client <ref>。
 --to v2rayn 写 VLESS URI（.vless.txt）。--to vless-qr 离线生成同一条 URI 的 PNG 二维码（.vless.png）。
 --to mihomo-provider 只写 proxies 列表。--to mihomo-profile 写最小配置：一个节点、一个 select 组、一条 MATCH；不开启 TUN，不改系统 DNS。
 mihomo YAML 的 reality-opts 写入 support-x25519mlkem768；已在 Mihomo 1.19.33/1.19.34 对接 Xray 26.11.9 REALITY 的实测中验证为必需，不保证所有客户端组合。
@@ -38,14 +46,16 @@ mihomo YAML 的 reality-opts 写入 support-x25519mlkem768；已在 Mihomo 1.19.
 sing-box 的 reality 只写官方字段 enabled、public_key、short_id，并启用 utls 指纹 chrome。network 为 tcp。packet_encoding 写空字符串，因为 sing-box 1.14.4 省略该字段时会启用 xudp。
 sing-box 没有与 support-x25519mlkem768 对应的官方字段，也不写 curve_preferences。官方稳定版 1.14.4 在 REALITY 客户端代码里去掉 X25519MLKEM768；这不是配置项。未做 sing-box 握手验证。
 默认 chrome 指纹。服务器 network 为 raw 时仍导出 tcp。Mihomo 不写 udp 与 packet-encoding。
-多客户端时通过 status 返回的 ref 选择。防火墙与 SSH 配置不会自动调整。
+防火墙与 SSH 配置不会自动调整。
+这些文件默认写在私有数据目录下的 local/private/cli-nodes/<node>/。
+pull 的 --out 必须是已经存在的目录，命令会把它收紧为仅当前用户可访问。
 --data-dir <path> 只覆盖这一次命令的私有数据目录。开发目录默认仍使用仓库内的 local/private。
 已安装副本的私有数据默认在用户主目录的 .routequay，不放在程序目录，更新和卸载也不会删除它。
 退出码 0 完成，2 参数或不支持，3 基线/目标冲突，4 连接或本地 I/O 失败。
 `;
 export function parseArguments(args: string[]): SetupOptions {
   const [command, nodeId, ...flags] = args;
-  if (!['setup', 'status', 'export', 'endpoint'].includes(command) || !nodeId || nodeId.startsWith('-')) throw new AdoptionError('USAGE');
+  if (!['setup', 'status', 'export', 'endpoint', 'pull'].includes(command) || !nodeId || nodeId.startsWith('-')) throw new AdoptionError('USAGE');
   const options: SetupOptions = { command: command as AdoptionOptions['command'], nodeId, to: 'v2rayn' };
   const seen = new Set<string>();
   for (let i = 0; i < flags.length; i++) {
@@ -82,7 +92,9 @@ export function parseArguments(args: string[]): SetupOptions {
     else if (['--ssh', '--out', '--client', '--to'].includes(flag)) {
       const value = flags[++i];
       if (!value || value.startsWith('-')) throw new AdoptionError('OPTION_VALUE_REQUIRED');
-      if (flag !== '--ssh' && command !== 'export') throw new AdoptionError('OPTION_NOT_APPLICABLE');
+      const artifactCommand = command === 'export' || command === 'pull';
+      if (flag === '--to' && command !== 'export') throw new AdoptionError('OPTION_NOT_APPLICABLE');
+      if ((flag === '--out' || flag === '--client') && !artifactCommand) throw new AdoptionError('OPTION_NOT_APPLICABLE');
       if (flag === '--ssh') options.ssh = value;
       if (flag === '--out') options.out = value;
       if (flag === '--client') options.client = value;
@@ -103,8 +115,15 @@ export function renderHumanResult(result: AdoptionResult): string {
   ];
   if ('plan' in result) lines.push(JSON.stringify(result.plan, null, 2));
   if ('networkStatus' in result) lines.push(`网络验证 ${result.networkStatus}`);
-  if (result.outputFile) lines.push(`私有导出 ${result.outputFile}`);
-  if (result.format) lines.push(`导出格式 ${result.format}`);
+  const outputFiles = Array.isArray(result.outputFiles) ? result.outputFiles : [];
+  if (outputFiles.length) {
+    if (typeof result.outputDirectory === 'string') lines.push(`私有目录 ${result.outputDirectory}`);
+    for (const file of outputFiles) {
+      if (file && typeof file === 'object' && 'path' in file && typeof file.path === 'string') lines.push(`私有导出 ${file.path}`);
+    }
+  } else if (result.outputFile) lines.push(`私有导出 ${result.outputFile}`);
+  if (typeof result.format === 'string') lines.push(`导出格式 ${result.format}`);
+  else if (Array.isArray(result.formats)) lines.push(`带回格式 ${result.formats.join(', ')}`);
   if (result.code) lines.push(`原因 ${result.code}`);
   lines.push(`未验证 ${(result.unverified as string[]).join(', ')}`);
   return lines.join('\n');
@@ -134,7 +153,7 @@ export async function main(args = process.argv.slice(2), env: NodeJS.ProcessEnv 
     if (command.json) console.log(JSON.stringify(result));
     else console.log(renderHumanResult(result));
     return result.code ? (['unknown', 'failed-restored', 'rollback-failed', 'installed-local-state-incomplete',
-      'completed-cleanup-failed', 'cleanup-failed'].includes(result.status) ? 4 : 2) : 0;
+      'adopted-local-handoff-failed', 'completed-cleanup-failed', 'cleanup-failed'].includes(result.status) ? 4 : 2) : 0;
   } catch (error) {
     const failure = error instanceof InstallLayoutError ? new AdoptionError(error.code, 2)
       : error instanceof AdoptionError ? error : new AdoptionError('LOCAL_OR_REMOTE_OPERATION_FAILED', 4);
