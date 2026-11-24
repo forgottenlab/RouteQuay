@@ -33,7 +33,7 @@ Several mature networking and Xray management projects already exist. RouteQuay 
 
 **Tested deployment targets:** Ubuntu 24.04 LTS and Debian 13, with Xray v26.11.9 used in the recorded real-machine tests. This is **not** a claim of support for every Linux distribution, hosting provider, transport, or client.
 
-The CLI commands currently retain the development-era name `vpncp` while the public brand is being prepared as **RouteQuay**. A command rename is not a requirement for the first release.
+The primary command is `routequay`. `vpncp` remains a compatibility entry for the same program. Source files may still use the earlier name.
 
 ## 📦 Installation and prerequisites
 
@@ -43,8 +43,10 @@ Use Node.js 22.19.0 or newer and npm. This snapshot runs TypeScript directly wit
 npm ci
 npm run build
 npm run check
-.\vpncp.cmd --help
+.\routequay.cmd --help
 ```
+
+`.\vpncp.cmd` remains available and runs the same program. A current-user install that does not require staying in this checkout is described in [Windows install](docs/INSTALL.md). `routequay init-config` creates the operator config when it is missing and prints only that path. Versioned GitHub Releases are not published yet.
 
 For the validated Windows-based operator workflow, prerequisites include an available OpenSSH client, a configured SSH host alias, working key-based access and known host-key verification. The remote Linux host must meet the tool's supported environment and privilege checks.
 
@@ -52,41 +54,41 @@ The validated management environment is Windows with PowerShell and OpenSSH. Rem
 
 ## 🖥️ CLI quick reference
 
-Run commands from the project checkout using PowerShell. `example-node` is an SSH host alias configured by the operator; it is not a default server.
+Run commands from the project checkout using PowerShell, or from any new terminal after the Windows install adds `routequay` to the current-user PATH. `example-node` is an SSH host alias configured by the operator; it is not a default server. `vpncp` accepts the same arguments.
 
 ```powershell
 # Inspect the intended setup operation without making changes.
-.\vpncp.cmd setup example-node --plan
+.\routequay.cmd setup example-node --plan
 
 # Inspect an already configured node.
-.\vpncp.cmd status example-node
+.\routequay.cmd status example-node
 
 # Export a client URI to a protected local file; do not paste it into an issue.
-.\vpncp.cmd export example-node --to v2rayn
-.\vpncp.cmd export example-node --to vless-qr
+.\routequay.cmd export example-node --to v2rayn
+.\routequay.cmd export example-node --to vless-qr
 
 # Mihomo / Clash Meta: a proxies list, or a minimal profile file.
-.\vpncp.cmd export example-node --to mihomo-provider
-.\vpncp.cmd export example-node --to mihomo-profile
+.\routequay.cmd export example-node --to mihomo-provider
+.\routequay.cmd export example-node --to mihomo-profile
 
 # sing-box: one local JSON file. Import that file; there is no subscription URL.
-.\vpncp.cmd export example-node --to sing-box
+.\routequay.cmd export example-node --to sing-box
 ```
 
-After reviewing a clean-host plan, `vpncp setup example-node --apply` explicitly approves installation. An existing host may instead be adopted. Read the planned operation and backup/restore information before approving changes.
+After reviewing a clean-host plan, `routequay setup example-node --apply` explicitly approves installation. An existing host may instead be adopted. Read the planned operation and backup/restore information before approving changes.
 
 When an existing server's public address legitimately changes, the CLI also provides an explicitly authorized operation:
 
 ```powershell
 # Documentation-only address from the RFC 5737 example range.
-.\vpncp.cmd endpoint example-node --host 203.0.113.10
+.\routequay.cmd endpoint example-node --host 203.0.113.10
 ```
 
 This does **not** authorize a new SSH server identity. Strict host-key validation must continue to succeed. Do not use the example IP as a real destination.
 
 ## Client export
 
-`vpncp export <node> --to <format>` writes a private file and prints the path only. It does not print the URI, YAML, JSON, UUID, REALITY public key, or short ID. `--out` chooses another path. The same bytes are left in place; different bytes are refused with `OUTPUT_EXISTS`.
+`routequay export <node> --to <format>` writes a private file and prints the path only. It does not print the URI, YAML, JSON, UUID, REALITY public key, or short ID. `--out` chooses another path. The same bytes are left in place; different bytes are refused with `OUTPUT_EXISTS`.
 
 | `--to` | Default file | When to use it |
 |---|---|---|

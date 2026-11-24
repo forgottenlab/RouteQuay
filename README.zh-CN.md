@@ -33,7 +33,7 @@ RouteQuay 是轻量、快捷、安全的网络接入与服务器管理工具，�
 
 **已测试系统：** Ubuntu 24.04 LTS、Debian 13。已归档的实机验证使用 Xray v26.11.9。上述事实**不代表**支持所有 Linux 发行版、云平台、协议或客户端。
 
-项目正式品牌已确定为 **RouteQuay**；当前 CLI 仍沿用开发阶段的 `vpncp` 命令名。首发不以改名为前置条件。
+正式命令是 `routequay`。`vpncp` 仍是同一程序的兼容入口。源码文件名可以继续沿用早期名称。
 
 ## 📦 安装与环境要求
 
@@ -43,8 +43,10 @@ RouteQuay 是轻量、快捷、安全的网络接入与服务器管理工具，�
 npm ci
 npm run build
 npm run check
-.\vpncp.cmd --help
+.\routequay.cmd --help
 ```
+
+`.\vpncp.cmd` 仍然可用，并且运行同一程序。不停留在本仓库目录的当前用户安装见 [Windows 安装](docs/INSTALL.zh-CN.md)。`routequay init-config` 会在操作员配置不存在时创建它，并且只打印路径。尚未发布带版本号的 GitHub Release。
 
 当前已验证的 Windows 管理端流程依赖可用的 OpenSSH 客户端、配置好的 SSH Host 别名、密钥认证及可信主机密钥记录；远端 Linux 还需通过工具的环境与权限检查。
 
@@ -52,41 +54,41 @@ npm run check
 
 ## 🖥️ 命令示例
 
-以下示例在项目目录的 PowerShell 中执行。`example-node` 是使用者自行配置的 SSH 主机别名，不是预设服务器。
+以下示例在项目目录的 PowerShell 中执行。完成 Windows 安装并写入当前用户 PATH 后，也可以在新终端直接运行 `routequay`。`example-node` 是使用者自行配置的 SSH 主机别名，不是预设服务器。`vpncp` 接受相同参数。
 
 ```powershell
 # 只读查看准备执行的部署操作。
-.\vpncp.cmd setup example-node --plan
+.\routequay.cmd setup example-node --plan
 
 # 查看已配置节点的状态。
-.\vpncp.cmd status example-node
+.\routequay.cmd status example-node
 
 # 导出到受保护的本地文件，不要公开完整 VLESS URI。
-.\vpncp.cmd export example-node --to v2rayn
-.\vpncp.cmd export example-node --to vless-qr
+.\routequay.cmd export example-node --to v2rayn
+.\routequay.cmd export example-node --to vless-qr
 
 # Mihomo / Clash Meta：已有配置用节点列表，首次导入用最小配置文件。
-.\vpncp.cmd export example-node --to mihomo-provider
-.\vpncp.cmd export example-node --to mihomo-profile
+.\routequay.cmd export example-node --to mihomo-provider
+.\routequay.cmd export example-node --to mihomo-profile
 
 # sing-box：一份本地 JSON。导入该文件，不提供订阅 URL。
-.\vpncp.cmd export example-node --to sing-box
+.\routequay.cmd export example-node --to sing-box
 ```
 
-空机计划审核后使用 `vpncp setup example-node --apply` 显式确认安装；已有 Xray 实例可能进入接管流程。在应用任何更改前，应先确认计划、备份和恢复方式。
+空机计划审核后使用 `routequay setup example-node --apply` 显式确认安装；已有 Xray 实例可能进入接管流程。在应用任何更改前，应先确认计划、备份和恢复方式。
 
 当同一台服务器的公网地址合法变化时，可显式授权更新：
 
 ```powershell
 # 203.0.113.10 为文档示例保留地址，不能作为真实服务器使用。
-.\vpncp.cmd endpoint example-node --host 203.0.113.10
+.\routequay.cmd endpoint example-node --host 203.0.113.10
 ```
 
 这不是信任陌生服务器的操作。必须继续通过严格 SSH 主机密钥验证。
 
 ## 客户端导出
 
-`vpncp export <node> --to <格式>` 只把文件写到私有目录，终端只打印路径，不打印 URI、YAML、JSON、UUID、REALITY 公钥或 shortId。`--out` 可指定其他路径。内容相同则保留原文件；内容不同则拒绝并返回 `OUTPUT_EXISTS`。
+`routequay export <node> --to <格式>` 只把文件写到私有目录，终端只打印路径，不打印 URI、YAML、JSON、UUID、REALITY 公钥或 shortId。`--out` 可指定其他路径。内容相同则保留原文件；内容不同则拒绝并返回 `OUTPUT_EXISTS`。
 
 | `--to` | 默认文件 | 适用情况 |
 |---|---|---|

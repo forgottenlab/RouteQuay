@@ -103,6 +103,10 @@ Linux、Node.js v22.23.4 上执行 `npm ci --ignore-scripts --no-audit --no-fund
 - 2026-11-21 仍未把官方文件的隔离 HTTPS 写成新的状态码与出口矩阵，也不覆盖全部 Mihomo 与 Xray 版本组合。FlClash 0.9.4 对官方 `mihomo-profile` 的文件导入以 2026-11-23 复测为准。
 - sing-box JSON 通过 `sing-box check -c` 只说明 1.14.4 能加载该文件。2026-11-23 复测中，官方导出 JSON 对 Xray 26.11.9 的 REALITY 握手失败，错误为 `reality verification failed`。官方 sing-box 1.14.4 会从 REALITY ClientHello 去掉 `X25519MLKEM768`。同一路径上，Mihomo 1.19.33 使用官方字段 `reality-opts.support-x25519mlkem768: true` 时成功。这不构成削弱服务器 REALITY、修改 `minClientVer` 或添加非官方 sing-box JSON 字段的依据。
 
+## Windows 安装器
+
+`npm run test:installer` 在临时目录检查精简运行包的安装、当前用户 PATH 垫片解析、更新和卸载。更新与卸载不得改动单独的用户数据目录。测试不连接 SSH，不写注册表，也不安装 Node.js。PowerShell 入口由同一套 Node 安装逻辑执行；脚本本身在 Linux 检查里只做文本约束（确认后才改当前用户 PATH、不改系统级 PATH、不删除用户配置）。Windows ACL 仍由既有的私有路径助手负责，本项测试不把它记成已经在 Windows 上执行。
+
 ## 测试安全
 
 不得使用真实 SSH 密钥和客户端凭据作为 CI fixtures。使用测试用合成节点、临时路径和 mock transport。远端 `setup`、服务重启和云资源清理必须获得单独授权。

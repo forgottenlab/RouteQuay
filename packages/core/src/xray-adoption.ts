@@ -146,7 +146,7 @@ export function privateWrite(path: string, data: string, replace = false): void 
 }
 type State = { schemaVersion: string; nodeId: string; target: SshTarget; hash: string; probe: Probe };
 export type AdoptionOptions = { command: 'setup' | 'status' | 'export' | 'endpoint'; nodeId: string; ssh?: string;
-  expectedHost?: string; plan?: boolean; json?: boolean; out?: string; client?: string; to?: string };
+  expectedHost?: string; plan?: boolean; json?: boolean; out?: string; client?: string; to?: string; dataDir?: string };
 export type AdoptionResult = { schemaVersion: string; nodeId: string; operation: string; status: string;
   changed: boolean; checkedAt: string; [key: string]: unknown };
 const digest = (config: unknown) => createHash('sha256').update(JSON.stringify(config)).digest('hex');

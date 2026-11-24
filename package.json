@@ -9,20 +9,24 @@
     "node": ">=22.19.0"
   },
   "bin": {
+    "routequay": "apps/cli/src/vpncp.ts",
     "vpncp": "apps/cli/src/vpncp.ts"
   },
   "scripts": {
+    "routequay": "node apps/cli/src/vpncp.ts",
     "vpncp": "node apps/cli/src/vpncp.ts",
+    "pack:runtime": "node scripts/pack-runtime.mjs",
     "build": "npm run typecheck",
     "typecheck": "tsc --noEmit",
-    "test:unit": "node --test packages/core/test/config-shape.test.ts packages/core/test/client-summary.test.ts packages/exporters/test/shadowrocket-real.test.ts packages/exporters/test/mihomo-export.test.ts packages/exporters/test/vless-qr.test.ts packages/exporters/test/sing-box-export.test.ts",
+    "test:unit": "node --test packages/core/test/config-shape.test.ts packages/core/test/client-summary.test.ts packages/core/test/install-layout.test.ts packages/core/test/operator-config.test.ts packages/exporters/test/shadowrocket-real.test.ts packages/exporters/test/mihomo-export.test.ts packages/exporters/test/vless-qr.test.ts packages/exporters/test/sing-box-export.test.ts",
     "test:safety": "node --test packages/core/test/redaction.test.ts packages/core/test/permissions.test.ts",
     "test:adoption": "node --test apps/cli/test/adoption.test.ts",
     "test:install": "node --test apps/cli/test/install.test.ts",
     "test:ssh": "node --test packages/core/test/ssh-trust.test.ts",
-    "test:cli": "node --test apps/cli/test/adoption.test.ts apps/cli/test/install.test.ts",
+    "test:cli": "node --test apps/cli/test/adoption.test.ts apps/cli/test/install.test.ts apps/cli/test/operator-config.test.ts",
     "test:smoke": "node scripts/cli-smoke.mjs",
-    "check": "npm run typecheck && npm run test:unit && npm run test:safety && npm run test:ssh && npm run test:cli && npm run test:smoke && npm run check:candidate",
+    "test:installer": "node --test scripts/windows-install.test.mjs",
+    "check": "npm run typecheck && npm run test:unit && npm run test:safety && npm run test:ssh && npm run test:cli && npm run test:smoke && npm run test:installer && npm run check:candidate",
     "test": "npm run check",
     "check:candidate": "node scripts/check-candidate.mjs"
   },

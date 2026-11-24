@@ -1,18 +1,25 @@
 #!/usr/bin/env node
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { AdoptionError, runAdoption, type AdoptionOptions, type AdoptionResult } from '../../../packages/core/src/xray-adoption.ts';
+import { InstallLayoutError, resolveStateRoot } from '../../../packages/core/src/install-layout.ts';
+import { applyOperatorSshAlias, initOperatorConfig, operatorConfigPath, readOperatorConfig } from '../../../packages/core/src/operator-config.ts';
 import { isExportFormat } from '../../../packages/exporters/src/client-connection.ts';
 import { runSetup, type SetupOptions } from '../../../packages/core/src/xray-install.ts';
 import { createInterface } from 'node:readline/promises';
 
-export const help = `vpncp — 通过 OpenSSH 接管现有 Xray
+export const help = `routequay — 通过 OpenSSH 接管现有 Xray
 
-  vpncp setup <node> [--ssh <Host>] [--plan | --apply] [--port 8443] [--json]
-  vpncp status <node> [--ssh <Host>] [--json]
-  vpncp endpoint <node> --host <new-host> [--json]
-  vpncp export <node> --to v2rayn|vless-qr|mihomo-provider|mihomo-profile|sing-box [--client <ref>] [--out <path>] [--json]
+正式命令是 routequay。vpncp 调用同一程序，保留为兼容入口。
+
+  routequay setup <node> [--ssh <Host>] [--plan | --apply] [--port 8443] [--json]
+  routequay status <node> [--ssh <Host>] [--json]
+  routequay endpoint <node> --host <new-host> [--json]
+  routequay export <node> --to v2rayn|vless-qr|mihomo-provider|mihomo-profile|sing-box [--client <ref>] [--out <path>] [--json]
+  routequay init-config
 
 默认 SSH Host 与 node 同名；接管后复用已保存的 Host。
+若用户配置里的节点写了 sshAlias，且命令没有 --ssh，则用该别名。host、user、port、identityFile 只作校验和记录，identityFile 是密钥路径而不是密钥内容。
+init-config 在用户数据目录创建 config.json。文件已存在时拒绝覆盖，并且只打印路径。init 是同一命令。
 setup 接管已有实例；干净 Debian 13 / Ubuntu 24.04 LTS 可安装固定 Xray 26.11.9。
 自动识别架构、systemd、包管理器及文件权限能力；缺依赖时停止，不自动安装包。
 空机交互模式展示计划并确认一次；非交互安装必须指定 --apply。
@@ -32,6 +39,8 @@ sing-box 的 reality 只写官方字段 enabled、public_key、short_id，并启
 sing-box 没有与 support-x25519mlkem768 对应的官方字段，也不写 curve_preferences。官方稳定版 1.14.4 在 REALITY 客户端代码里去掉 X25519MLKEM768；这不是配置项。未做 sing-box 握手验证。
 默认 chrome 指纹。服务器 network 为 raw 时仍导出 tcp。Mihomo 不写 udp 与 packet-encoding。
 多客户端时通过 status 返回的 ref 选择。防火墙与 SSH 配置不会自动调整。
+--data-dir <path> 只覆盖这一次命令的私有数据目录。开发目录默认仍使用仓库内的 local/private。
+已安装副本的私有数据默认在用户主目录的 .routequay，不放在程序目录，更新和卸载也不会删除它。
 退出码 0 完成，2 参数或不支持，3 基线/目标冲突，4 连接或本地 I/O 失败。
 `;
 export function parseArguments(args: string[]): SetupOptions {
@@ -44,6 +53,11 @@ export function parseArguments(args: string[]): SetupOptions {
     if (seen.has(flag)) throw new AdoptionError('DUPLICATE_OPTION');
     seen.add(flag);
     if (flag === '--json') options.json = true;
+    else if (flag === '--data-dir') {
+      const value = flags[++i];
+      if (!value || value.startsWith('-')) throw new AdoptionError('OPTION_VALUE_REQUIRED');
+      options.dataDir = value;
+    }
     else if (flag === '--plan' && command === 'setup') options.plan = true;
     else if (flag === '--apply' && command === 'setup') options.apply = true;
     else if (flag === '--host' && command === 'endpoint') {
@@ -95,25 +109,35 @@ export function renderHumanResult(result: AdoptionResult): string {
   lines.push(`未验证 ${(result.unverified as string[]).join(', ')}`);
   return lines.join('\n');
 }
-export async function main(args = process.argv.slice(2)): Promise<number> {
+export async function main(args = process.argv.slice(2), env: NodeJS.ProcessEnv = process.env): Promise<number> {
   if (args.includes('--help') || args.length === 0) { console.log(help); return 0; }
   try {
+    const programRoot = fileURLToPath(new URL('../../../', import.meta.url));
+    if (args[0] === 'init-config' || args[0] === 'init') {
+      if (args.slice(1).some(arg => arg !== '--json')) throw new AdoptionError('UNKNOWN_OPTION');
+      const configPath = initOperatorConfig(programRoot, operatorConfigPath(env));
+      console.log(args.includes('--json') ? JSON.stringify({ path: configPath }) : configPath);
+      return 0;
+    }
     const options = parseArguments(args);
-    const root = fileURLToPath(new URL('../../../', import.meta.url));
-    const result = options.command === 'setup' ? await runSetup(options, root, undefined,
+    const config = readOperatorConfig(operatorConfigPath(env));
+    const command = applyOperatorSshAlias(options, config);
+    const root = resolveStateRoot(programRoot, { dataDir: command.dataDir, configuredDataDir: config?.dataDir, env });
+    const result = command.command === 'setup' ? await runSetup(command, root, undefined,
       process.stdin.isTTY && !options.json ? async plan => {
         console.log(`安装 Xray ${plan.version} · 节点 ${plan.nodeId} · TCP ${plan.port} · REALITY ${plan.realityTarget}`);
         console.log('将创建服务账号、配置和 systemd unit，保存恢复记录；防火墙规则需自行核对。');
         const prompt = createInterface({ input: process.stdin, output: process.stdout });
         try { return /^y(?:es)?$/i.test((await prompt.question('执行此安装计划？[y/N] ')).trim()); }
         finally { prompt.close(); }
-      } : undefined) : runAdoption(options, root);
-    if (options.json) console.log(JSON.stringify(result));
+      } : undefined) : runAdoption(command, root);
+    if (command.json) console.log(JSON.stringify(result));
     else console.log(renderHumanResult(result));
     return result.code ? (['unknown', 'failed-restored', 'rollback-failed', 'installed-local-state-incomplete',
       'completed-cleanup-failed', 'cleanup-failed'].includes(result.status) ? 4 : 2) : 0;
   } catch (error) {
-    const failure = error instanceof AdoptionError ? error : new AdoptionError('LOCAL_OR_REMOTE_OPERATION_FAILED', 4);
+    const failure = error instanceof InstallLayoutError ? new AdoptionError(error.code, 2)
+      : error instanceof AdoptionError ? error : new AdoptionError('LOCAL_OR_REMOTE_OPERATION_FAILED', 4);
     const body = { schemaVersion: 'vpncp-result-v1', operation: args[0], status: 'failed', code: failure.code,
       changed: false, checkedAt: new Date().toISOString(), details: failure.details };
     console.log(args.includes('--json') ? JSON.stringify(body) : `操作失败 ${failure.code}${failure.details?.reason ? '\n' + failure.details.reason : ''}`);
