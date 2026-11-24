@@ -4,6 +4,8 @@
 
 尚未发布 GitHub Release。可以从当前仓库安装一份供当前用户使用的精简运行包。安装器不会安装 Node.js，不会修改系统级 PATH，也不会删除私有节点状态。
 
+可选的本机助手技能在仓库 `.agents/skills/routequay/`。安装器不把它复制进运行包，也不会把它安装到远端主机。不加载它时，`routequay` 仍然完整可用。
+
 ## 环境
 
 - 带 PowerShell 的 Windows

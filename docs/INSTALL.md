@@ -4,6 +4,8 @@
 
 GitHub Releases are not published yet. This checkout can install a slim runtime for the current user. The installer does not install Node.js, does not change the machine PATH, and does not delete private node state.
 
+The optional local assistant skill lives in this repository at `.agents/skills/routequay/`. The installer does not copy it into the runtime, and it is not installed on the remote host. `routequay` stays complete when that skill is not loaded.
+
 ## Requirements
 
 - Windows with PowerShell

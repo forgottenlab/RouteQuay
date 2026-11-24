@@ -38,6 +38,14 @@ RouteQuay 是轻量、快捷、安全的网络接入与服务器管理工具，�
 
 正式命令是 `routequay`。`vpncp` 仍是同一程序的兼容入口。源码文件名可以继续沿用早期名称。
 
+## 可选的本机助手（Path B）
+
+Path A 是 `routequay` 命令。安装、状态、导出、`pull`、`add-client` 和本机分组都不需要助手。
+
+Path B 是仓库里的可选技能，文件是 `.agents/skills/routequay/SKILL.md`。CLI 不读取它。操作员在本机使用会加载 `.agents/skills/` 的助手打开本仓库，或把该目录复制到本机的用户技能目录时，助手才会看到它。未加载时，Path A 照常使用。助手只能运行已经存在的 `routequay` 命令，并且只汇报路径、节点 id、`inbound-N-client-N`、分组名和状态或错误码。不要把这个技能安装、复制或运行到 Xray 主机上。
+
+主机防火墙、安全组和 GitHub Release 仍留在后面。这条技能不执行它们。
+
 ## 📦 安装与环境要求
 
 需要 Node.js 22.19.0 或更新版本及 npm。Node 直接运行 TypeScript；`build` 执行类型检查，不生成 bundle。在本仓库目录执行：
