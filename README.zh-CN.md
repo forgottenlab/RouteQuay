@@ -27,7 +27,7 @@ RouteQuay 是轻量、快捷、安全的网络接入与服务器管理工具，�
 | 导出本地 VLESS 二维码 PNG（`vless-qr`） | 离线单元测试已覆盖；2026-11-21 在两台已记录节点上，v2rayN 图形界面导入官方 PNG 成功。2026-11-23：Shadowrocket 导入了与 v2rayN 粘贴相同的剪贴板 `vless://` URI，并扫码导入离线 VLESS 二维码。只记录导入，没有流量或出口结果 |
 | 导出 Mihomo YAML（`mihomo-provider` 或 `mihomo-profile`） | 2026-11-21：Ubuntu 24.04 与 Debian 13、Xray 26.11.9 上，Mihomo 1.19.33 需要未加引号的 `support-x25519mlkem768: true`。2026-11-23：FlClash 0.9.4 以文件导入直接导入官方 `mihomo-profile`，两台验收节点的延迟测试成功。请导入官方导出，不要使用编辑过的测试副本。不覆盖全部版本组合 |
 | 导出本地 sing-box JSON（`sing-box`） | 2026-11-23：官方导出 JSON 通过 sing-box 1.14.4 的 `sing-box check -c`。对 Xray 26.11.9 的 REALITY 握手失败（`reality verification failed`）。官方 1.14.4 会从 REALITY ClientHello 去掉 `X25519MLKEM768`。同一路径上 Mihomo 1.19.33 使用官方字段 `reality-opts.support-x25519mlkem768: true` 时成功。不要削弱服务器 REALITY、修改 `minClientVer` 或添加非官方字段 |
-| 把客户端文件带回本机（`pull`） | 安装或接管成功后自动写到操作员机器的私有目录，也可以稍后执行 `pull`。包含 VLESS URI 文件、二维码 PNG、Mihomo YAML 和 sing-box JSON。终端只打印路径。不提供订阅 URL |
+| 把客户端文件带回本机（`pull`） | 成功的首次安装，以及本地状态有变化的接管，会自动写到当前数据根；之后也可以再执行 `pull`。五种现行文件是 VLESS URI、二维码 PNG、Mihomo provider、Mihomo profile 和 sing-box JSON。终端只打印路径。带安装标记的安装与未标记的检出使用不同数据根，不会自动迁移。不提供订阅 URL |
 | 显式更新公网地址并保留 SSH 主机身份 | 已实现并测试 |
 | SSH 身份保护、事务恢复和本地状态保护 | 已实现，存在明确使用边界 |
 | Web 可视化管理及更广泛的网络功能 | 实验阶段，**不属于首发稳定范围** |
@@ -47,7 +47,13 @@ npm run check
 .\routequay.cmd --help
 ```
 
-`.\vpncp.cmd` 仍然可用，并且运行同一程序。不停留在本仓库目录的当前用户安装见 [Windows 安装](docs/INSTALL.zh-CN.md)。`routequay init-config` 会在操作员配置不存在时创建它，并且只打印路径。尚未发布带版本号的 GitHub Release。
+`.\vpncp.cmd` 仍然可用，并且运行同一程序。不停留在本仓库目录的当前用户安装见 [Windows 安装](docs/INSTALL.zh-CN.md)。已有 Windows 安装的正式更新，在检出目录执行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Action update -Yes
+```
+
+这条命令更新现有目标目录里的程序文件，不删除用户配置，也不把检出目录里的节点状态迁走。不带 `-ConfirmPath` 时，非交互运行不修改 PATH，安装器输出的 `pathUpdated` 为 `false`；交互运行仍会询问。当前用户 PATH 已经包含程序目录、且这次没有确认 PATH 时，更新不改写 PATH。`routequay init-config` 会在操作员配置不存在时创建它，并且只打印路径。尚未发布带版本号的 GitHub Release。
 
 当前已验证的 Windows 管理端流程依赖可用的 OpenSSH 客户端、配置好的 SSH Host 别名、密钥认证及可信主机密钥记录；远端 Linux 还需通过工具的环境与权限检查。
 
@@ -75,7 +81,7 @@ npm run check
 # sing-box：一份本地 JSON。导入该文件，不提供订阅 URL。
 .\routequay.cmd export example-node --to sing-box
 
-# 一次把五种现行文件写回本机私有目录。终端只打印路径。
+# 一次把五种现行文件写回当前数据根。终端只打印路径。
 .\routequay.cmd pull example-node
 ```
 
@@ -92,13 +98,15 @@ npm run check
 
 ## 客户端导出
 
-`routequay export <node> --to <格式>` 只把一种文件写到私有目录，终端只打印路径，不打印 URI、YAML、JSON、UUID、REALITY 公钥或 shortId。`--out` 可指定其他文件路径。内容相同则保留原文件；内容不同则拒绝并返回 `OUTPUT_EXISTS`。
+`routequay export <node> --to <格式>` 只把一种文件写到私有目录，终端只打印路径，不打印 URI、YAML、JSON、UUID、密钥或 shortId。`--out` 可指定其他文件路径。内容相同则保留原文件；内容不同则拒绝并返回 `OUTPUT_EXISTS`。
 
-`routequay pull <node>` 使用同一套导出器，把 VLESS URI（`.vless.txt`）、VLESS 二维码 PNG、Mihomo provider、Mihomo profile 和 sing-box JSON 一起写回本机。成功的空机安装，以及接管已有实例且本地状态发生变化时，会自动做同样的带回。状态没有变化时不改这些文件。终端和 `--json` 只打印目录与路径。
+`routequay pull <node>` 复用上述导出器，把五种现行文件写进当前数据根下的 `local/private/cli-nodes/<node>/`：`<ref>.vless.txt`、`<ref>.vless.png`、`<ref>.mihomo-provider.yaml`、`<ref>.mihomo-profile.yaml`、`<ref>.sing-box.json`。多于一个客户端时加上 `--client <ref>`。`--out` 必须是已经存在的目录。成功的首次安装，以及接管时本地状态发生变化，会自动写下同样的五个文件。多个客户端时自动带回不会猜测客户端：接管可以完成，带回失败并返回 `CLIENT_SELECTION_REQUIRED`，此时再执行 `pull --client <ref>`。本地状态没有变化的接管不重写这五个文件。默认的人类可读输出和 `--json` 只打印目标目录和路径，不打印 URI、UUID、密钥或 shortId。
 
-默认目录是私有数据目录下的 `local/private/cli-nodes/<node>/`。未安装的开发目录仍用仓库里的 `local/private`。已安装副本用 `%USERPROFILE%\.routequay\`，也可以用 `--data-dir` 或 `ROUTEQUAY_DATA_DIR`。不会自动迁移旧的仓库数据。
+数据根有两处，各自保留，没有自动迁移。程序目录带有安装标记 `routequay-install.json` 时，数据根是 `%USERPROFILE%\.routequay\`。`--data-dir` 只覆盖这一次命令，`ROUTEQUAY_DATA_DIR` 次之。用户配置 `config.json` 里的 `dataDir` 只对这种已安装副本生效，模板值是 `~/.routequay`。没有安装标记的检出目录使用仓库根，节点状态在仓库的 `local/private`；此时 `config.json` 里的 `dataDir` 不会把数据根改到用户主目录。在检出目录里创建的节点状态，已安装的 `routequay` 看不到。要使用那些状态，在安装数据根里安装或接管该节点，或用 `--data-dir` 指向检出目录。`--data-dir` 是包含 `local/private` 的数据根，不是 `local/private` 目录本身。`config.json` 的 `nodes` 只记录 SSH 别名等操作员配置，不能代替 `local/private/cli-nodes/<node>/` 下的节点状态。更新已有安装之后，`%USERPROFILE%\.routequay\` 里可能仍然只有 `config.json`，没有节点状态。这时 `routequay pull <node>` 在 SSH 之前失败，代码是 `SETUP_REQUIRED`（退出码 2）。这是预期结果。
 
-`pull` 对这个目录里的同名现行文件采用覆盖：内容逐字节相同则保留并重新收紧权限；内容不同则替换。符号链接直接拒绝。权限无法收紧时命令失败，不把凭据留在更宽松的文件里。`pull --out` 必须是已经存在的目录，该目录也会被收紧为仅当前用户可访问。`export --out` 写到其他路径的副本不会被 `pull` 修改。`endpoint` 不自动改已有文件；需要新地址的现行文件时再执行 `pull`。多个客户端时必须加上 `--client <ref>`。
+当前数据根里已经有该节点的本地状态时，`pull` 仍会先通过 SSH 探测服务器，然后再写文件。SSH 无法连接时，正式错误是 `SSH_UNAVAILABLE`（退出码 4）。五个现行文件不会被写入或修改。这种连不上的结果使用 `SSH_UNAVAILABLE`；`SSH_AUTH_FAILED` 是另一条错误。
+
+`pull` 对这个目录里的同名现行文件：逐字节相同则保留并重新收紧权限；字节不同则覆盖。符号链接直接拒绝。权限收紧失败时命令失败并停止，不把凭据留在更宽松的文件里。`pull --out` 指向的已有目录也会被收紧为仅当前用户可访问。`export --out` 复制出去的文件，之后的 `pull` 不会修改。`endpoint` 不刷新已有现行文件；地址变更后再执行 `pull`。
 
 | `--to` | 默认文件 | 适用情况 |
 |---|---|---|

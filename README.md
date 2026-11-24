@@ -27,7 +27,7 @@ Several mature networking and Xray management projects already exist. RouteQuay 
 | Export a local VLESS QR PNG (`vless-qr`) | Offline decode in unit tests; 2026-11-21 v2rayN GUI image import succeeded on the two recorded nodes. 2026-11-23: Shadowrocket imported the same clipboard `vless://` URI used for v2rayN paste, and scanned the offline VLESS QR. Import only; no traffic or egress result |
 | Export Mihomo YAML (`mihomo-provider` or `mihomo-profile`) | 2026-11-21: on Ubuntu 24.04 and Debian 13 with Xray 26.11.9, Mihomo 1.19.33 required unquoted `support-x25519mlkem768: true`. 2026-11-23: FlClash 0.9.4 imported the official `mihomo-profile` YAML by file import, and delay tests succeeded on both acceptance nodes. Import the official export, not an edited test copy. Not every version pair |
 | Export a local sing-box JSON profile (`sing-box`) | 2026-11-23: the official exported JSON passed sing-box 1.14.4 `sing-box check -c`. The REALITY handshake to Xray 26.11.9 failed with `reality verification failed`. Official 1.14.4 strips `X25519MLKEM768` from the REALITY ClientHello. On the same path, Mihomo 1.19.33 with official `reality-opts.support-x25519mlkem768: true` succeeded. Do not weaken server REALITY, change `minClientVer`, or add unofficial sing-box JSON fields |
-| Bring client files back to this machine (`pull`) | After a successful install or adoption, and whenever `pull` is run later. Writes a VLESS URI file, a QR PNG, Mihomo YAML, and sing-box JSON into the operator's private directory. The terminal prints paths only. There is no subscription URL |
+| Bring client files back to this machine (`pull`) | A successful first install, and an adoption that changes local state, writes into the active data root. `pull` can be run again later. The five current files are a VLESS URI, a QR PNG, a Mihomo provider, a Mihomo profile, and sing-box JSON. The terminal prints paths only. A marked install and an unmarked checkout use different data roots, with no automatic migration. There is no subscription URL |
 | Explicitly update a server endpoint while preserving SSH host identity | Implemented and tested |
 | SSH identity checks, transaction recovery, local state protection | Implemented; see limitations |
 | Web management UI and broader network management | Experimental; **not part of the first stable scope** |
@@ -47,7 +47,13 @@ npm run check
 .\routequay.cmd --help
 ```
 
-`.\vpncp.cmd` remains available and runs the same program. A current-user install that does not require staying in this checkout is described in [Windows install](docs/INSTALL.md). `routequay init-config` creates the operator config when it is missing and prints only that path. Versioned GitHub Releases are not published yet.
+`.\vpncp.cmd` remains available and runs the same program. A current-user install that does not require staying in this checkout is described in [Windows install](docs/INSTALL.md). The official update of an existing Windows install, from the checkout, is:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Action update -Yes
+```
+
+That command updates program files in the existing destination. It does not delete user configuration, and it does not move node state out of the checkout. Without `-ConfirmPath`, a non-interactive run leaves PATH unchanged and the installer reports `pathUpdated` as `false`; an interactive run still asks. When the current-user PATH already contains the program directory and this run does not confirm PATH, the update leaves PATH unchanged. `routequay init-config` creates the operator config when it is missing and prints only that path. Versioned GitHub Releases are not published yet.
 
 For the validated Windows-based operator workflow, prerequisites include an available OpenSSH client, a configured SSH host alias, working key-based access and known host-key verification. The remote Linux host must meet the tool's supported environment and privilege checks.
 
@@ -75,7 +81,7 @@ Run commands from the project checkout using PowerShell, or from any new termina
 # sing-box: one local JSON file. Import that file; there is no subscription URL.
 .\routequay.cmd export example-node --to sing-box
 
-# Write all five current files into the local private directory. The terminal prints paths only.
+# Write all five current files into the active data root. The terminal prints paths only.
 .\routequay.cmd pull example-node
 ```
 
@@ -92,13 +98,15 @@ This does **not** authorize a new SSH server identity. Strict host-key validatio
 
 ## Client export
 
-`routequay export <node> --to <format>` writes one private file and prints the path only. It does not print the URI, YAML, JSON, UUID, REALITY public key, or short ID. `--out` chooses another file path. The same bytes are left in place; different bytes are refused with `OUTPUT_EXISTS`.
+`routequay export <node> --to <format>` writes one private file and prints the path only. It does not print the URI, YAML, JSON, UUID, keys, or shortId. `--out` chooses another file path. The same bytes are left in place; different bytes are refused with `OUTPUT_EXISTS`.
 
-`routequay pull <node>` uses those same exporters to write the VLESS URI (`.vless.txt`), the VLESS QR PNG, the Mihomo provider, the Mihomo profile, and the sing-box JSON together on this machine. A successful first install does this automatically, as does adoption of an existing instance when the saved state changes. An unchanged setup leaves the files alone. The terminal and `--json` print the directory and paths only.
+`routequay pull <node>` reuses those exporters and writes five canonical files into `local/private/cli-nodes/<node>/` of the active data root: `<ref>.vless.txt`, `<ref>.vless.png`, `<ref>.mihomo-provider.yaml`, `<ref>.mihomo-profile.yaml`, and `<ref>.sing-box.json`. When more than one client exists, pass `--client <ref>`. `--out` must be an already-existing directory. A successful first install, and an adoption that changes local state, write the same five files. Automatic bring-back does not choose among several clients: adoption can finish, bring-back fails with `CLIENT_SELECTION_REQUIRED`, and the operator then runs `pull --client <ref>`. An unchanged adoption does not rewrite the five files. Default human output and `--json` print destinations and paths only. They do not print the URI, UUID, keys, or shortId.
 
-The default directory is `local/private/cli-nodes/<node>/` under the private data directory. An uninstalled checkout still uses `local/private` inside the repository. An installed copy uses `%USERPROFILE%\.routequay\`, or `--data-dir` / `ROUTEQUAY_DATA_DIR`. Old checkout data is not migrated.
+There are two data roots, and nothing is migrated from one to the other. A program directory that contains the install marker `routequay-install.json` uses `%USERPROFILE%\.routequay\`. `--data-dir` overrides that root for one command, and `ROUTEQUAY_DATA_DIR` is next. `dataDir` in `config.json` applies only to that marked install; the template value is `~/.routequay`. An unmarked checkout uses the repository root, so node state stays in the repository's `local/private`. On an unmarked checkout, `dataDir` in `config.json` does not move the data root to the user profile. Node state created in the checkout is not visible to the installed `routequay` until the operator installs or adopts that node in the install data root, or points `--data-dir` at the checkout. `--data-dir` is the data root that contains `local/private`, not the `local/private` directory itself. The `nodes` list in `config.json` records operator settings such as the SSH alias. It does not replace node state under `local/private/cli-nodes/<node>/`. After an update, `%USERPROFILE%\.routequay\` may still contain only `config.json` and no node state. `routequay pull <node>` then fails with `SETUP_REQUIRED` (exit 2) before SSH. That result is expected.
 
-`pull` overwrites the canonical files in that directory: identical bytes stay in place and permissions are tightened again; different bytes are replaced. Symbolic links are refused. If permissions cannot be tightened, the command fails instead of leaving credentials in a looser file. `pull --out` must be an existing directory, and that directory is tightened to the current user. Copies made with `export --out` are not modified by `pull`. `endpoint` does not change existing files; run `pull` when the current files should use the new address. More than one client requires `--client <ref>`.
+When local node state for that node already exists in the active data root, including a checkout, `pull` still probes the server over SSH before writing artifacts. If SSH cannot connect, the official error is `SSH_UNAVAILABLE` (exit 4). No canonical files are written or changed. A failure to connect uses `SSH_UNAVAILABLE`. `SSH_AUTH_FAILED` is a different error.
+
+`pull` keeps canonical files whose bytes are identical and tightens their permissions again. Different bytes are overwritten. Symbolic links are refused. If permission tightening fails, the command fails closed and does not leave credentials in a looser file. The existing directory given to `pull --out` is tightened to the current user as well. Copies made with `export --out` are not modified by a later `pull`. `endpoint` does not refresh existing artifact files; run `pull` again after a new address.
 
 | `--to` | Default file | When to use it |
 |---|---|---|
