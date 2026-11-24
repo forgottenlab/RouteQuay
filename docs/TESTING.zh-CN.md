@@ -35,7 +35,7 @@ npm run test:safety
 
 `vpncp export --to v2rayn|vless-qr|mihomo-provider|mihomo-profile|sing-box` 在本地 mock 中覆盖字段映射、IPv6、空 shortId、代理名与组名不冲突、未知 `--to`（含笼统的 `clash`）拒绝、内容不同则 `OUTPUT_EXISTS`、以及 JSON/人类可读输出不包含 URI、UUID、公钥或 shortId。`v2rayn` 仍写 `.vless.txt`；`vless-qr` 写 `.vless.png`，单元测试用合成 fixture 解码二维码并与 URI 逐字节比对。Mihomo YAML 的 `reality-opts` 断言包含 `support-x25519mlkem768: true`。provider 只有 `proxies:`；profile 只有一个节点、一个 select 组和一条 `MATCH`，不写 TUN、DNS、`udp` 或 `packet-encoding`。`sing-box` 写 `.sing-box.json`，断言见下一节。
 
-`routequay pull <node>` 复用上述五种导出，把文件写到临时数据目录的 `local/private/cli-nodes/<node>/`。测试断言目录 0700、文件 0600（非 Windows）、默认人类可读输出和 JSON 只有路径、不含 URI、UUID、私钥、公钥或 shortId。同名现行文件的策略是覆盖：内容相同则保留并重新收紧权限；内容不同则替换为新的导出字节。符号链接拒绝，并且不会顺带改写其他文件。缺少的 `--out` 目录拒绝创建。单次 `export` 仍在内容不同时返回 `OUTPUT_EXISTS`。成功的 `setup --apply` 会写回全部五种文件；状态未变化的再次 setup 不改已有文件；状态变化后的接管会覆盖同名现行文件。多个客户端且没有 `--client` 时，接管本身完成，带回失败并给出 `CLIENT_SELECTION_REQUIRED`。这些测试不连接真实 SSH，也不写入真实用户主目录。
+`routequay pull <node>` 复用上述五种导出，把文件写到临时数据目录的 `local/private/cli-nodes/<node>/`：`<ref>.vless.txt`、`<ref>.vless.png`、`<ref>.mihomo-provider.yaml`、`<ref>.mihomo-profile.yaml`、`<ref>.sing-box.json`。测试断言目录 0700、文件 0600（非 Windows）、默认人类可读输出和 JSON 只有路径、不含 URI、UUID、私钥、公钥或 shortId。同名现行文件的策略是覆盖：内容相同则保留并重新收紧权限；内容不同则替换为新的导出字节。符号链接拒绝，并且不会顺带改写其他文件。权限收紧失败时命令失败。缺少的 `--out` 目录拒绝创建。单次 `export` 仍在内容不同时返回 `OUTPUT_EXISTS`。成功的 `setup --apply` 会写回全部五种文件；状态未变化的再次 setup 不改已有文件；状态变化后的接管会覆盖同名现行文件。多个客户端且没有 `--client` 时，接管本身完成，带回失败并给出 `CLIENT_SELECTION_REQUIRED`。这些测试不连接真实 SSH，也不写入真实用户主目录，因此不覆盖“已有本地状态时 SSH 连不上”。该情况见下文 2026-11-24 Windows 操作员核对：错误是 `SSH_UNAVAILABLE`（退出码 4），现行文件保持不变。
 
 这些检查不连接 SSH，也不与 FlClash 或 Mihomo 握手。Windows ACL 用例在 `process.platform !== 'win32'` 时直接返回，TAP 仍会计为通过；只在 Linux 上跑完测试，不能写成已经执行 Windows ACL。POSIX 文件 0600、目录 0700 只在实际执行该断言的系统上成立。
 
@@ -50,6 +50,15 @@ Linux、Node.js v22.23.4 上执行 `npm ci --ignore-scripts --no-audit --no-fund
 ### 2026-11-24 本地带回检查
 
 Linux、Node.js v22.23.4 上执行 `npm ci --ignore-scripts --no-audit --no-fund` 和 `npm run check`：类型检查通过；单元 28、安全 5、SSH 信任 2、CLI 46、安装器 16 全部通过，0 失败。smoke 通过。候选文件扫描 64 个文件通过。没有连接 SSH，没有写入真实用户主目录，没有做客户端握手。Windows ACL 用例因平台不是 win32 立即返回，这次没有执行 Windows ACL。`pull` 的 0600/0700 断言在这次 Linux 运行里执行并通过。
+
+## 2026-11-24 Windows 操作员核对（Asia/Shanghai）
+
+本节只记录 PR #9 进入 `main`（`81bcb1f`）之后，在操作员 Windows 机器上已经核对过的安装更新和 `pull`。不写主机名、地址或文件哈希，也不把这次核对写成新的客户端握手或发行版范围。
+
+- 在检出目录执行 `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Action update -Yes`。它更新现有目标目录中的程序文件，不删除用户配置。当时没有同时使用 `-ConfirmPath`。当前用户 PATH 已经包含程序目录，安装器输出 `pathUpdated` 为 `false`。
+- 带安装标记 `routequay-install.json` 的安装使用 `%USERPROFILE%\.routequay\`，也可以用 `--data-dir` 或 `ROUTEQUAY_DATA_DIR`。没有安装标记的检出使用仓库里的 `local/private`。两处数据根不会自动迁移。检出目录里的节点状态，已安装的 `routequay` 看不到。
+- 更新之后，`%USERPROFILE%\.routequay\` 里可以只有 `config.json`，没有节点状态。此时 `routequay pull <node>` 在 SSH 之前返回 `SETUP_REQUIRED`。`config.json` 里的 `nodes` 不能代替节点状态。
+- 检出目录里已经有节点状态时，`pull` 仍先通过 SSH 探测。SSH 无法连接时，正式错误是 `SSH_UNAVAILABLE`（退出码 4），五个现行文件不写入、也不改动。`SSH_AUTH_FAILED` 是另一条错误。
 
 ## sing-box JSON 导出
 
@@ -111,7 +120,7 @@ Linux、Node.js v22.23.4 上执行 `npm ci --ignore-scripts --no-audit --no-fund
 
 ## Windows 安装器
 
-`npm run test:installer` 在临时目录检查精简运行包的安装、当前用户 PATH 垫片解析、更新和卸载。更新与卸载不得改动单独的用户数据目录。测试不连接 SSH，不写注册表，也不安装 Node.js。PowerShell 入口由同一套 Node 安装逻辑执行；脚本本身在 Linux 检查里只做文本约束（确认后才改当前用户 PATH、不改系统级 PATH、不删除用户配置）。Windows ACL 仍由既有的私有路径助手负责，本项测试不把它记成已经在 Windows 上执行。
+`npm run test:installer` 在临时目录检查精简运行包的安装、当前用户 PATH 垫片解析、更新和卸载。更新与卸载不得改动单独的用户数据目录。测试不连接 SSH，不写注册表，也不安装 Node.js。PowerShell 入口由同一套 Node 安装逻辑执行；脚本本身在 Linux 检查里只做文本约束（确认后才改当前用户 PATH、不改系统级 PATH、不删除用户配置）。Windows ACL 仍由既有的私有路径助手负责，本项测试不把它记成已经在 Windows 上执行。2026-11-24 的 Windows 操作员核对另记正式更新命令在未加 `-ConfirmPath`、且当前用户 PATH 已含程序目录时输出 `pathUpdated` 为 `false`，并保留用户配置。那次核对不是本项 Linux 安装器测试。
 
 `npm ci` 在 Windows 上不能直接 `spawn` / `spawnSync` 一个 `.cmd` 或 `.bat`。Node.js 在没有 `shell` 时会返回 `EINVAL`；Volta 这类 `npm.cmd` 会走到这条路径。安装器改为通过 `cmd.exe /d /s /c` 运行 `npm.cmd` 和固定的 `ci` 参数。失败结果除 `NPM_CI_FAILED` 外还带删减后的 `reason`。测试断言这条调用形状，并用临时目录里的假 `npm` 走一遍不带 `--skip-npm` 的安装。Linux 检查不执行 PowerShell，也不执行真实 `.cmd`，也不碰真实用户配置目录。
 
