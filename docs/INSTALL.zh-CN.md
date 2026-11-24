@@ -28,7 +28,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Yes -
 
 ## 操作员配置
 
-`routequay init-config` 在文件不存在时，把 `examples/operator-config.example.json` 复制到 `%USERPROFILE%\.routequay\config.json`。`init` 是同一命令。已有文件不会被覆盖，命令只打印路径。数据目录和文件只允许当前用户访问。
+`routequay init-config` 在文件不存在时，把 `examples/operator-config.example.json` 复制到 `%USERPROFILE%\.routequay\config.json`，并且只打印路径。`init` 是同一命令。已有文件不会被覆盖：命令以退出码 2 结束，标准输出仍然只有该路径。加上 `--json` 时，失败对象的 `code` 是 `OPERATOR_CONFIG_EXISTS`，并带上同一路径，不打印文件内容。数据目录和文件只允许当前用户访问。
 
 模板没有口令字段。`sshAlias` 选择 `%USERPROFILE%\.ssh\config` 里已经存在的 OpenSSH 主机。`host`、`user`、`port` 和 `identityFile` 是可选项；`identityFile` 只保存密钥路径，不保存密钥内容。命令仍用 `ssh -G` 解析别名，并保持 `BatchMode=yes` 和 `StrictHostKeyChecking=yes`。`vpn.example.invalid` 和 `example-user` 只是占位符。
 
