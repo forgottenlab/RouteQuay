@@ -19,4 +19,6 @@ for (const format of ['vless-qr','mihomo-provider','mihomo-profile','sing-box'])
   assert.equal(accepted.status,2);assert.equal(JSON.parse(accepted.stdout).code,'SETUP_REQUIRED');
   assert.equal(accepted.stdout.includes('vless://'),false);
 }
+const skillCheck = spawnSync(process.execPath, ['scripts/skill-check.mjs'], { encoding: 'utf8' });
+assert.equal(skillCheck.status, 0, skillCheck.stdout + skillCheck.stderr);
 console.log('CLI smoke PASS: help and safe parameter rejection; no SSH');

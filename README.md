@@ -38,6 +38,14 @@ Several mature networking and Xray management projects already exist. RouteQuay 
 
 The primary command is `routequay`. `vpncp` remains a compatibility entry for the same program. Source files may still use the earlier name.
 
+## Optional local assistant (Path B)
+
+Path A is the `routequay` command. Setup, status, export, pull, add-client, and local groups need no assistant.
+
+Path B is an optional local skill at `.agents/skills/routequay/SKILL.md`. The CLI never reads it. A local assistant sees it only when the operator opens this repository in an assistant that loads `.agents/skills/`, or copies that directory into the user skill directory on this machine. Until it is loaded, Path A is unchanged. The assistant may run only existing `routequay` commands, and it reports paths, node ids, `inbound-N-client-N` refs, group names, and status or error codes. Do not install, copy, or run this skill on the Xray host.
+
+Host firewall changes, security groups, and a GitHub Release stay later. This skill does not perform them.
+
 ## 📦 Installation and prerequisites
 
 Use Node.js 22.19.0 or newer and npm. This snapshot runs TypeScript directly with Node; `build` performs type checking and creates no bundle. From the checkout:
