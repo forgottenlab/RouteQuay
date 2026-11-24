@@ -44,6 +44,16 @@ export const installTransport: InstallTransport = {
     return result.status === 0 ? result.stdout.trim() : 'unknown';
   }
 };
+function bringBackAfterAdopt(adopted: AdoptionResult, options: SetupOptions, root: string,
+  transport: InstallTransport): AdoptionResult {
+  try {
+    const pulled = runAdoption({ command: 'pull', nodeId: options.nodeId, ssh: options.ssh, client: options.client }, root, transport);
+    return { ...adopted, outputFile: pulled.outputFile, outputFiles: pulled.outputFiles, outputDirectory: pulled.outputDirectory };
+  } catch (error) {
+    return { ...adopted, status: 'adopted-local-handoff-failed', code: 'ADOPTION_LOCAL_HANDOFF_FAILED', changed: true,
+      localHandoffCode: error instanceof AdoptionError ? error.code : 'LOCAL_OPERATION_FAILED' };
+  }
+}
 function refuse(code: string, details?: AdoptionError['details']): never {
   const error = new AdoptionError(code, 3);
   error.details = details;
@@ -182,7 +192,11 @@ export async function runSetup(options: SetupOptions, root = '.', transport: Ins
   const status = runAdoption({ ...options, command: 'status' }, root, transport);
   status.operation = 'setup';
   if (status.status === 'unsupported') return { ...status, action: 'inspect' };
-  if (status.status !== 'not-installed') return runAdoption(options, root, transport);
+  if (status.status !== 'not-installed') {
+    const adopted = runAdoption(options, root, transport);
+    if (options.plan || adopted.status !== 'adopted') return adopted;
+    return bringBackAfterAdopt(adopted, options, root, transport);
+  }
   const target = transport.resolve(String(status.sshAlias));
   const probe = transport.probe(target);
   const plan = installPlan(options, target, probe);
@@ -210,7 +224,7 @@ export async function runSetup(options: SetupOptions, root = '.', transport: Ins
     try {
       adopted = runAdoption({ ...options, command: 'setup', plan: false }, root, transport);
       if (!adopted.managed || adopted.service !== 'active' || adopted.diskMatchesRunning !== true) refuse('POST_INSTALL_READINESS_UNVERIFIED');
-      exported = runAdoption({ command: 'export', nodeId: options.nodeId, ssh: options.ssh, to: 'v2rayn' }, root, transport);
+      exported = runAdoption({ command: 'pull', nodeId: options.nodeId, ssh: options.ssh }, root, transport);
     } catch (error) {
       return { ...status, status: 'installed-local-state-incomplete', code: 'INSTALL_LOCAL_HANDOFF_FAILED', changed: true,
         localHandoffCode: error instanceof AdoptionError ? error.code : 'LOCAL_OPERATION_FAILED',
@@ -218,6 +232,7 @@ export async function runSetup(options: SetupOptions, root = '.', transport: Ins
     }
     const externalTcp = await tcp(target.host, plan.port);
     return { ...adopted, status: 'installed', changed: true, outputFile: exported.outputFile,
+      outputFiles: exported.outputFiles, outputDirectory: exported.outputDirectory,
       localReadiness: 'ready', externalTcp, proxyHttps: 'not-verified', unverified: ['proxy-https', 'cloud-firewall'],
       networkStatus: externalTcp === 'reachable' ? 'tcp-reachable-proxy-unverified' : 'local-ready-external-unreachable',
       diagnostics: externalTcp === 'reachable' ? [] : [{ code: 'CHECK_FIREWALL_AND_CLOUD_RULES',

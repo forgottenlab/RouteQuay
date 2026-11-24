@@ -27,6 +27,7 @@ RouteQuay 是轻量、快捷、安全的网络接入与服务器管理工具，�
 | 导出本地 VLESS 二维码 PNG（`vless-qr`） | 离线单元测试已覆盖；2026-11-21 在两台已记录节点上，v2rayN 图形界面导入官方 PNG 成功。2026-11-23：Shadowrocket 导入了与 v2rayN 粘贴相同的剪贴板 `vless://` URI，并扫码导入离线 VLESS 二维码。只记录导入，没有流量或出口结果 |
 | 导出 Mihomo YAML（`mihomo-provider` 或 `mihomo-profile`） | 2026-11-21：Ubuntu 24.04 与 Debian 13、Xray 26.11.9 上，Mihomo 1.19.33 需要未加引号的 `support-x25519mlkem768: true`。2026-11-23：FlClash 0.9.4 以文件导入直接导入官方 `mihomo-profile`，两台验收节点的延迟测试成功。请导入官方导出，不要使用编辑过的测试副本。不覆盖全部版本组合 |
 | 导出本地 sing-box JSON（`sing-box`） | 2026-11-23：官方导出 JSON 通过 sing-box 1.14.4 的 `sing-box check -c`。对 Xray 26.11.9 的 REALITY 握手失败（`reality verification failed`）。官方 1.14.4 会从 REALITY ClientHello 去掉 `X25519MLKEM768`。同一路径上 Mihomo 1.19.33 使用官方字段 `reality-opts.support-x25519mlkem768: true` 时成功。不要削弱服务器 REALITY、修改 `minClientVer` 或添加非官方字段 |
+| 把客户端文件带回本机（`pull`） | 安装或接管成功后自动写到操作员机器的私有目录，也可以稍后执行 `pull`。包含 VLESS URI 文件、二维码 PNG、Mihomo YAML 和 sing-box JSON。终端只打印路径。不提供订阅 URL |
 | 显式更新公网地址并保留 SSH 主机身份 | 已实现并测试 |
 | SSH 身份保护、事务恢复和本地状态保护 | 已实现，存在明确使用边界 |
 | Web 可视化管理及更广泛的网络功能 | 实验阶段，**不属于首发稳定范围** |
@@ -73,6 +74,9 @@ npm run check
 
 # sing-box：一份本地 JSON。导入该文件，不提供订阅 URL。
 .\routequay.cmd export example-node --to sing-box
+
+# 一次把五种现行文件写回本机私有目录。终端只打印路径。
+.\routequay.cmd pull example-node
 ```
 
 空机计划审核后使用 `routequay setup example-node --apply` 显式确认安装；已有 Xray 实例可能进入接管流程。在应用任何更改前，应先确认计划、备份和恢复方式。
@@ -88,7 +92,13 @@ npm run check
 
 ## 客户端导出
 
-`routequay export <node> --to <格式>` 只把文件写到私有目录，终端只打印路径，不打印 URI、YAML、JSON、UUID、REALITY 公钥或 shortId。`--out` 可指定其他路径。内容相同则保留原文件；内容不同则拒绝并返回 `OUTPUT_EXISTS`。
+`routequay export <node> --to <格式>` 只把一种文件写到私有目录，终端只打印路径，不打印 URI、YAML、JSON、UUID、REALITY 公钥或 shortId。`--out` 可指定其他文件路径。内容相同则保留原文件；内容不同则拒绝并返回 `OUTPUT_EXISTS`。
+
+`routequay pull <node>` 使用同一套导出器，把 VLESS URI（`.vless.txt`）、VLESS 二维码 PNG、Mihomo provider、Mihomo profile 和 sing-box JSON 一起写回本机。成功的空机安装，以及接管已有实例且本地状态发生变化时，会自动做同样的带回。状态没有变化时不改这些文件。终端和 `--json` 只打印目录与路径。
+
+默认目录是私有数据目录下的 `local/private/cli-nodes/<node>/`。未安装的开发目录仍用仓库里的 `local/private`。已安装副本用 `%USERPROFILE%\.routequay\`，也可以用 `--data-dir` 或 `ROUTEQUAY_DATA_DIR`。不会自动迁移旧的仓库数据。
+
+`pull` 对这个目录里的同名现行文件采用覆盖：内容逐字节相同则保留并重新收紧权限；内容不同则替换。符号链接直接拒绝。权限无法收紧时命令失败，不把凭据留在更宽松的文件里。`pull --out` 必须是已经存在的目录，该目录也会被收紧为仅当前用户可访问。`export --out` 写到其他路径的副本不会被 `pull` 修改。`endpoint` 不自动改已有文件；需要新地址的现行文件时再执行 `pull`。多个客户端时必须加上 `--client <ref>`。
 
 | `--to` | 默认文件 | 适用情况 |
 |---|---|---|

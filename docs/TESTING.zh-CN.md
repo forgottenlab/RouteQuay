@@ -35,6 +35,8 @@ npm run test:safety
 
 `vpncp export --to v2rayn|vless-qr|mihomo-provider|mihomo-profile|sing-box` 在本地 mock 中覆盖字段映射、IPv6、空 shortId、代理名与组名不冲突、未知 `--to`（含笼统的 `clash`）拒绝、内容不同则 `OUTPUT_EXISTS`、以及 JSON/人类可读输出不包含 URI、UUID、公钥或 shortId。`v2rayn` 仍写 `.vless.txt`；`vless-qr` 写 `.vless.png`，单元测试用合成 fixture 解码二维码并与 URI 逐字节比对。Mihomo YAML 的 `reality-opts` 断言包含 `support-x25519mlkem768: true`。provider 只有 `proxies:`；profile 只有一个节点、一个 select 组和一条 `MATCH`，不写 TUN、DNS、`udp` 或 `packet-encoding`。`sing-box` 写 `.sing-box.json`，断言见下一节。
 
+`routequay pull <node>` 复用上述五种导出，把文件写到临时数据目录的 `local/private/cli-nodes/<node>/`。测试断言目录 0700、文件 0600（非 Windows）、默认人类可读输出和 JSON 只有路径、不含 URI、UUID、私钥、公钥或 shortId。同名现行文件的策略是覆盖：内容相同则保留并重新收紧权限；内容不同则替换为新的导出字节。符号链接拒绝，并且不会顺带改写其他文件。缺少的 `--out` 目录拒绝创建。单次 `export` 仍在内容不同时返回 `OUTPUT_EXISTS`。成功的 `setup --apply` 会写回全部五种文件；状态未变化的再次 setup 不改已有文件；状态变化后的接管会覆盖同名现行文件。多个客户端且没有 `--client` 时，接管本身完成，带回失败并给出 `CLIENT_SELECTION_REQUIRED`。这些测试不连接真实 SSH，也不写入真实用户主目录。
+
 这些检查不连接 SSH，也不与 FlClash 或 Mihomo 握手。Windows ACL 用例在 `process.platform !== 'win32'` 时直接返回，TAP 仍会计为通过；只在 Linux 上跑完测试，不能写成已经执行 Windows ACL。POSIX 文件 0600、目录 0700 只在实际执行该断言的系统上成立。
 
 兼容性口径与 README 相同：FlClash 0.9.0+ 可以解析 `vless://`，但解析成功不是握手成功；不把当前 26.11.9 安装写成必然拒绝 Mihomo；不把 `minClientVer` 改成 1.8.2，也不削弱 REALITY。2026-11-21 的有限实机记录只覆盖下文点名的版本与两台 VPS。2026-11-23 的验收复测另记 FlClash 0.9.4 官方 profile 文件导入、Shadowrocket 导入，以及 sing-box 1.14.4 的握手结果。
@@ -44,6 +46,10 @@ npm run test:safety
 Linux、Node.js v22.23.4 上执行 `npm ci --ignore-scripts --no-audit --no-fund` 和 `npm run check`：类型检查通过；单元 16、安全 5、SSH 信任 2、CLI 39 全部通过，0 失败。smoke 与候选文件扫描（45 个文件）通过。没有连接 SSH，没有做 FlClash 或 Mihomo 握手。
 
 同一次 CLI 测试中，Windows ACL 用例因平台不是 win32 立即返回，TAP 仍把它计为通过。这次没有执行 Windows ACL。文件 0600 与目录 0700 的断言在这次 Linux 运行里执行并通过。
+
+### 2026-11-24 本地带回检查
+
+Linux、Node.js v22.23.4 上执行 `npm ci --ignore-scripts --no-audit --no-fund` 和 `npm run check`：类型检查通过；单元 28、安全 5、SSH 信任 2、CLI 46、安装器 16 全部通过，0 失败。smoke 通过。候选文件扫描 64 个文件通过。没有连接 SSH，没有写入真实用户主目录，没有做客户端握手。Windows ACL 用例因平台不是 win32 立即返回，这次没有执行 Windows ACL。`pull` 的 0600/0700 断言在这次 Linux 运行里执行并通过。
 
 ## sing-box JSON 导出
 

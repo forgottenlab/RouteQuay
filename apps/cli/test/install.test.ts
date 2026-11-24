@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateInstallScript, installPlan, runSetup, xrayRelease, type InstallInspection, type InstallTransport } from '../../../packages/core/src/xray-install.ts';
 import { AdoptionError, runAdoption, type Probe } from '../../../packages/core/src/xray-adoption.ts';
-import { parseArguments } from '../src/vpncp.ts';
+import { parseArguments, renderHumanResult } from '../src/vpncp.ts';
 
 function fixture(os = 'debian', release = '13') {
   const root = mkdtempSync(join(tmpdir(), 'vpncp-install-'));
@@ -86,6 +86,44 @@ test('apply is wired through installer to adoption, status and export; repeat pr
   assert.equal(JSON.stringify(f.probe.config), before);
   assert.equal(f.executions, 1);
   assert.equal(JSON.stringify(result).includes(f.probe.config.inbounds[0].settings.clients[0].id), false);
+});
+test('setup bring-back writes every local artifact and a later adoption overwrites canonical files', async () => {
+  const f = fixture();
+  const result = await runSetup({ command: 'setup', nodeId: 'blank', apply: true }, f.root, f.transport, undefined, async () => 'reachable');
+  assert.equal(result.status, 'installed');
+  const files = result.outputFiles as { format: string; path: string }[];
+  assert.deepEqual(files.map(file => file.format), ['vless-uri', 'vless-qr-png', 'mihomo-provider', 'mihomo-profile', 'sing-box']);
+  assert.equal(String(result.outputDirectory).startsWith(f.root), true);
+  assert.equal(files.every(file => file.path.startsWith(String(result.outputDirectory))), true);
+  const secretKey = f.probe.config.inbounds[0].streamSettings.realitySettings.privateKey as string;
+  const clientId = f.probe.config.inbounds[0].settings.clients[0].id as string;
+  const human = renderHumanResult(result);
+  for (const secret of [secretKey, clientId, 'vless://']) {
+    assert.equal(JSON.stringify(result).includes(secret), false, secret);
+    assert.equal(human.includes(secret), false, secret);
+  }
+  assert.equal(human.includes(String(result.outputFile)), true);
+  assert.equal(readFileSync(files[1].path).subarray(0, 8).toString('binary'), '\x89PNG\r\n\x1a\n');
+  if (process.platform !== 'win32') {
+    assert.equal(statSync(String(result.outputDirectory)).mode & 0o777, 0o700);
+    for (const file of files) assert.equal(statSync(file.path).mode & 0o777, 0o600);
+  }
+  writeFileSync(String(result.outputFile), 'sentinel-not-a-secret\n');
+  const unchanged = await runSetup({ command: 'setup', nodeId: 'blank' }, f.root, f.transport);
+  assert.equal(unchanged.status, 'unchanged');
+  assert.equal(readFileSync(String(result.outputFile), 'utf8'), 'sentinel-not-a-secret\n');
+  f.probe.config.inbounds[0].settings.clients[0].email = 'other';
+  const refreshed = await runSetup({ command: 'setup', nodeId: 'blank' }, f.root, f.transport);
+  assert.equal(refreshed.status, 'adopted');
+  assert.equal(readFileSync(String(result.outputFile), 'utf8').includes('sentinel-not-a-secret'), false);
+  assert.equal(JSON.stringify(refreshed).includes(clientId), false);
+  assert.equal(renderHumanResult(refreshed).includes('vless://'), false);
+  f.probe.config.inbounds[0].settings.clients.push({ id: '22222222-2222-4222-8222-222222222222' });
+  const ambiguous = await runSetup({ command: 'setup', nodeId: 'blank' }, f.root, f.transport);
+  assert.equal(ambiguous.status, 'adopted-local-handoff-failed');
+  assert.equal(ambiguous.localHandoffCode, 'CLIENT_SELECTION_REQUIRED');
+  assert.equal(ambiguous.managed, true);
+  assert.equal(JSON.stringify(ambiguous).includes('22222222-2222-4222-8222-222222222222'), false);
 });
 test('port conflicts, permissions, residual installations and incomplete evidence stop installation', async () => {
   for (const [property, value, code] of [
