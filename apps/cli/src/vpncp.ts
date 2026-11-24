@@ -19,7 +19,7 @@ export const help = `routequay — 通过 OpenSSH 接管现有 Xray
 
 默认 SSH Host 与 node 同名；接管后复用已保存的 Host。
 若用户配置里的节点写了 sshAlias，且命令没有 --ssh，则用该别名。host、user、port、identityFile 只作校验和记录，identityFile 是密钥路径而不是密钥内容。
-init-config 在用户数据目录创建 config.json。文件已存在时拒绝覆盖，并且只打印路径。init 是同一命令。
+init-config 在用户数据目录创建 config.json。文件已存在时拒绝覆盖，退出码 2，并且只打印路径。init 是同一命令。
 setup 接管已有实例；干净 Debian 13 / Ubuntu 24.04 LTS 可安装固定 Xray 26.11.9。
 自动识别架构、systemd、包管理器及文件权限能力；缺依赖时停止，不自动安装包。
 空机交互模式展示计划并确认一次；非交互安装必须指定 --apply。
@@ -138,6 +138,10 @@ export async function main(args = process.argv.slice(2), env: NodeJS.ProcessEnv 
   } catch (error) {
     const failure = error instanceof InstallLayoutError ? new AdoptionError(error.code, 2)
       : error instanceof AdoptionError ? error : new AdoptionError('LOCAL_OR_REMOTE_OPERATION_FAILED', 4);
+    if (!args.includes('--json') && failure.code === 'OPERATOR_CONFIG_EXISTS' && failure.details?.reason) {
+      console.log(failure.details.reason);
+      return failure.exitCode;
+    }
     const body = { schemaVersion: 'vpncp-result-v1', operation: args[0], status: 'failed', code: failure.code,
       changed: false, checkedAt: new Date().toISOString(), details: failure.details };
     console.log(args.includes('--json') ? JSON.stringify(body) : `操作失败 ${failure.code}${failure.details?.reason ? '\n' + failure.details.reason : ''}`);

@@ -1,16 +1,16 @@
 import { spawnSync } from 'node:child_process';
 import {
-  existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, unlinkSync, writeFileSync
+  chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, unlinkSync, writeFileSync
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import {
-  INSTALL_MARKER, InstallerError, filePathStore, installRuntime, memoryPathStore, mergeUserPath, npmCiArgs,
-  nodeVersionSatisfies, parseMinimumNode, removeUserPath, resolvePathCommand, USER_PATH_SCOPE,
-  USER_PATH_WRITE_COMMAND
+  INSTALL_MARKER, InstallerError, defaultRunNpm, directBatchSpawnIsInvalid, filePathStore, installRuntime,
+  memoryPathStore, mergeUserPath, npmCiArgs, npmCiInvocation, nodeVersionSatisfies, parseMinimumNode,
+  publicNpmFailureReason, removeUserPath, resolvePathCommand, USER_PATH_SCOPE, USER_PATH_WRITE_COMMAND
 } from './install-win.mjs';
 import { listRuntimeFiles } from './runtime-manifest.mjs';
 import { packRuntime } from './pack-runtime.mjs';
@@ -202,6 +202,121 @@ test('npm ci is requested for production dependencies and can be skipped in fixt
   let called = '';
   install(box, { skipNpm: false, runNpm(dest) { called = dest; } });
   assert.equal(called, box.dest);
+});
+
+test('Windows npm ci is not a direct .cmd spawn and a failure keeps the spawn or npm reason', () => {
+  const source = readFileSync(join(repo, 'scripts', 'install-win.mjs'), 'utf8');
+  assert.equal(/spawnSync\(\s*['"]npm\.cmd['"]/.test(source), false);
+  const historical = { cwd: 'program', encoding: 'utf8', windowsHide: true };
+  assert.equal(directBatchSpawnIsInvalid('npm.cmd', historical), true);
+  assert.equal(directBatchSpawnIsInvalid('C:\\Program Files\\Volta\\npm.cmd', historical), true);
+  assert.equal(directBatchSpawnIsInvalid('npm.bat', {}), true);
+  const win = npmCiInvocation('win32', {});
+  assert.equal(win.file, 'cmd.exe');
+  assert.deepEqual(win.args, ['/d', '/s', '/c', '"npm.cmd ci --omit=dev --ignore-scripts --no-audit --no-fund"']);
+  assert.equal(win.options.windowsVerbatimArguments, true);
+  assert.equal(win.options.shell, undefined);
+  assert.equal(directBatchSpawnIsInvalid(win.file, win.options), false);
+  assert.equal(npmCiInvocation('win32', { ComSpec: 'cmd.exe' }).file, 'cmd.exe');
+  const unix = npmCiInvocation('linux', {});
+  assert.equal(unix.file, 'npm');
+  assert.deepEqual(unix.args, npmCiArgs);
+  assert.equal(unix.options.shell, undefined);
+  const box = workspace();
+  mkdirSync(box.dest, { recursive: true });
+  let seen;
+  defaultRunNpm(box.dest, (file, args, options) => {
+    seen = { file, args, options };
+    return { status: 0, stdout: '', stderr: '' };
+  });
+  const planned = npmCiInvocation();
+  assert.equal(seen.file, planned.file);
+  assert.deepEqual(seen.args, planned.args);
+  assert.equal(seen.options.cwd, box.dest);
+  assert.equal(seen.options.encoding, 'utf8');
+  assert.equal(seen.options.windowsHide, true);
+  assert.equal(directBatchSpawnIsInvalid(seen.file, seen.options), false);
+  assert.throws(() => defaultRunNpm(box.dest, () => ({
+    status: null,
+    stdout: '',
+    stderr: '',
+    error: Object.assign(new Error('spawnSync npm.cmd EINVAL'), { code: 'EINVAL' })
+  })), (error) => error instanceof InstallerError && error.code === 'NPM_CI_FAILED'
+    && error.reason.includes('EINVAL') && error.reason.includes('spawnSync npm.cmd EINVAL'));
+  const token = `${'ghp'}_${'c'.repeat(24)}`;
+  const uri = `${'vle'}${'ss'}://example`;
+  const reason = publicNpmFailureReason({
+    status: 1,
+    error: null,
+    stderr: `npm ERR! token=${token}\n${uri}\n${'x'.repeat(800)}`,
+    stdout: 'should stay hidden when stderr exists'
+  });
+  assert.equal(reason.includes(token), false);
+  assert.equal(reason.includes('ghp_'), false);
+  assert.equal(reason.includes(uri), false);
+  assert.match(reason, /token=\[redacted\]/);
+  assert.match(reason, /\[redacted\]/);
+  assert.equal(reason.includes('should stay hidden'), false);
+  assert.equal(reason.length <= 601, true);
+  assert.equal(publicNpmFailureReason({ status: 1, stdout: '', stderr: '' }), 'npm exited 1');
+  assert.equal(existsSync(join(box.dest, INSTALL_MARKER)), false);
+});
+
+function writeFakeNpm(bin, fail) {
+  mkdirSync(bin, { recursive: true });
+  if (process.platform === 'win32') {
+    const body = fail
+      ? '@echo off\r\necho npm ci failed: fixture token=%NPM_FIXTURE_TOKEN% 1>&2\r\nexit /b 1\r\n'
+      : '@echo off\r\necho added 2 packages\r\nexit /b 0\r\n';
+    writeFileSync(join(bin, 'npm.cmd'), body);
+    return;
+  }
+  const body = fail
+    ? '#!/bin/sh\nprintf \'%s\\n\' "npm ci failed: fixture token=${NPM_FIXTURE_TOKEN}" >&2\nexit 1\n'
+    : '#!/bin/sh\nprintf \'%s\\n\' "added 2 packages"\nexit 0\n';
+  const file = join(bin, 'npm');
+  writeFileSync(file, body);
+  chmodSync(file, 0o755);
+}
+
+function runInstallerCli(box, bin, extraEnv = {}) {
+  return spawnSync(process.execPath, [
+    join(repo, 'scripts', 'install-win.mjs'), 'install',
+    '--source', repo, '--dest', box.dest, '--data-dir', box.dataDir, '--confirm-path', 'no'
+  ], {
+    encoding: 'utf8',
+    env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH ?? ''}`, ...extraEnv }
+  });
+}
+
+test('the installer runs npm ci unless skipped and reports a redacted failure', () => {
+  const token = `${'ghp'}_${'d'.repeat(24)}`;
+  const failed = workspace();
+  const failBin = join(failed.root, 'bin');
+  writeFakeNpm(failBin, true);
+  const run = runInstallerCli(failed, failBin, { NPM_FIXTURE_TOKEN: token });
+  assert.equal(run.status, 2, run.stderr);
+  const body = JSON.parse(run.stdout);
+  assert.equal(body.ok, false);
+  assert.equal(body.code, 'NPM_CI_FAILED');
+  assert.match(body.reason, /npm ci failed: fixture/);
+  assert.equal(body.reason.includes(token), false);
+  assert.equal(body.reason.includes('ghp_'), false);
+  assert.match(body.reason, /token=\[redacted\]/);
+  assert.equal(run.stdout.includes('vless://'), false);
+  assert.equal(existsSync(join(failed.dest, 'routequay.cmd')), true);
+  assert.equal(existsSync(join(failed.dest, INSTALL_MARKER)), false);
+  assert.equal(existsSync(failed.dataDir), false);
+  const installed = workspace();
+  const okBin = join(installed.root, 'bin');
+  writeFakeNpm(okBin, false);
+  const success = runInstallerCli(installed, okBin);
+  assert.equal(success.status, 0, success.stdout + success.stderr);
+  const ok = JSON.parse(success.stdout);
+  assert.equal(ok.ok, true);
+  assert.equal(ok.pathUpdated, false);
+  assert.equal(existsSync(join(installed.dest, INSTALL_MARKER)), true);
+  assert.equal(existsSync(installed.dataDir), false);
 });
 
 test('the installed copy answers routequay help without the checkout', () => {

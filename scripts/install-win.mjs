@@ -15,15 +15,16 @@ export const USER_PATH_WRITE_COMMAND = "[Environment]::SetEnvironmentVariable('P
 export const npmCiArgs = ['ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'];
 
 export class InstallerError extends Error {
-  constructor(code) {
+  constructor(code, reason) {
     super(code);
     this.name = 'InstallerError';
     this.code = code;
+    if (reason) this.reason = reason;
   }
 }
 
-function fail(code) {
-  throw new InstallerError(code);
+function fail(code, reason) {
+  throw new InstallerError(code, reason);
 }
 
 export function parseMinimumNode(range) {
@@ -111,10 +112,98 @@ export function windowsUserPathStore() {
   };
 }
 
-export function defaultRunNpm(dest) {
-  const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  const result = spawnSync(npm, npmCiArgs, { cwd: dest, encoding: 'utf8', windowsHide: true });
-  if (result.status !== 0) fail('NPM_CI_FAILED');
+const NPM_REASON_LIMIT = 600;
+const cmdToken = /^[A-Za-z0-9_.=@/-]+$/;
+
+function windowsCommandShell(env) {
+  for (const key of ['ComSpec', 'comspec', 'COMSPEC']) {
+    const value = env?.[key];
+    if (typeof value === 'string' && value.trim()) return value;
+  }
+  return 'cmd.exe';
+}
+
+function assertNpmCiToken(token) {
+  if (!cmdToken.test(token)) fail('NPM_CI_ARGS_UNSAFE');
+}
+
+// Node.js returns EINVAL when spawn/spawnSync is given a .cmd or .bat file
+// without a shell (CVE-2024-27980). Volta's npm.cmd hits that path.
+// cmd.exe /d /s /c is the documented way to run that shim. Arguments stay
+// a fixed token list so the command string is not a general shell.
+export function npmCiInvocation(platform = process.platform, env = process.env) {
+  for (const token of ['npm.cmd', ...npmCiArgs]) assertNpmCiToken(token);
+  if (platform === 'win32') {
+    const command = ['npm.cmd', ...npmCiArgs].join(' ');
+    return {
+      file: windowsCommandShell(env),
+      args: ['/d', '/s', '/c', `"${command}"`],
+      options: { windowsVerbatimArguments: true }
+    };
+  }
+  return { file: 'npm', args: [...npmCiArgs], options: {} };
+}
+
+export function directBatchSpawnIsInvalid(file, options = {}) {
+  const base = String(file ?? '').replace(/^.*[\\/]/, '');
+  if (!/\.(?:cmd|bat)$/i.test(base)) return false;
+  if (options.shell === true) return false;
+  if (typeof options.shell === 'string' && options.shell.trim()) return false;
+  return true;
+}
+
+function asText(value) {
+  if (typeof value === 'string') return value;
+  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(value)) return value.toString('utf8');
+  return '';
+}
+
+export function publicNpmFailureReason(result) {
+  const parts = [];
+  const error = result?.error;
+  if (error) {
+    const code = typeof error.code === 'string' ? error.code : '';
+    const message = typeof error.message === 'string' ? error.message : '';
+    const line = [code, message].filter(Boolean).join(': ');
+    if (line) parts.push(line);
+  }
+  const stderr = asText(result?.stderr).trim();
+  const stdout = asText(result?.stdout).trim();
+  if (stderr) parts.push(stderr);
+  else if (stdout) parts.push(stdout);
+  if (!parts.length) {
+    if (result && result.status !== undefined && result.status !== null) return `npm exited ${result.status}`;
+    return 'npm ci failed without a status';
+  }
+  return sanitizeNpmReason(parts.join('\n'));
+}
+
+function sanitizeNpmReason(value) {
+  const cleaned = value
+    .replaceAll('\u0000', '')
+    .replace(/\r\n/g, '\n')
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '[redacted]')
+    .replace(/vless:\/\/\S+/gi, '[redacted]')
+    .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
+    .replace(/((?:_authToken|token|password|passphrase)\s*[=:]\s*)\S+/gi, '$1[redacted]')
+    .replace(/\b(?:ghp|gho)_[A-Za-z0-9]{16,}\b/g, '[redacted]')
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{16,}\b/g, '[redacted]')
+    .replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, '[redacted]')
+    .replace(/[ \t]+\n/g, '\n')
+    .trim();
+  if (cleaned.length <= NPM_REASON_LIMIT) return cleaned;
+  return `${cleaned.slice(0, NPM_REASON_LIMIT)}…`;
+}
+
+export function defaultRunNpm(dest, spawn = spawnSync) {
+  const planned = npmCiInvocation();
+  const result = spawn(planned.file, planned.args, {
+    cwd: dest,
+    encoding: 'utf8',
+    windowsHide: true,
+    ...planned.options
+  });
+  if (!result || result.status !== 0) fail('NPM_CI_FAILED', publicNpmFailureReason(result));
 }
 
 function readPackage(root) {
@@ -371,7 +460,9 @@ function runCli(argv) {
     }));
   } catch (error) {
     const code = error instanceof InstallerError ? error.code : 'INSTALL_FAILED';
-    console.log(JSON.stringify({ ok: false, code }));
+    const body = { ok: false, code };
+    if (error instanceof InstallerError && error.reason) body.reason = error.reason;
+    console.log(JSON.stringify(body));
     process.exitCode = 2;
   }
 }
