@@ -278,6 +278,8 @@ test('runtime files cover the CLI import graph and the PowerShell entry stays ex
     }
   }
   assert.deepEqual(missing, []);
+  assert.equal(files.has('examples/operator-config.example.json'), true);
+  assert.equal(files.has('packages/core/src/operator-config.ts'), true);
   const script = readFileSync(join(repo, 'scripts', 'install.ps1'), 'utf8');
   for (const phrase of ['does not install Node.js', 'engines.node', '[y/N]', '$ConfirmPath', 'current-user PATH', 'machine PATH is not changed', 'User configuration is kept', 'DefaultNoWhenRedirected']) {
     assert.equal(script.includes(phrase), true, phrase);

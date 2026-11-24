@@ -24,6 +24,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Yes -
 
 Private state for an installed copy defaults to `%USERPROFILE%\.routequay\`. It is not stored under the program directory. A development checkout keeps using `local\private\cli-nodes` unless that command is given `--data-dir` or `ROUTEQUAY_DATA_DIR`. Existing checkout data is not migrated.
 
+## Operator config
+
+`routequay init-config` copies `examples/operator-config.example.json` to `%USERPROFILE%\.routequay\config.json` when that file is missing. `init` is the same command. An existing file is left unchanged, and the command prints the path only. The data directory and file are private to the current user.
+
+The template has no password field. `sshAlias` selects an existing OpenSSH host from `%USERPROFILE%\.ssh\config`. `host`, `user`, `port`, and `identityFile` are optional; `identityFile` is a path, not key material. Commands still resolve the alias with `ssh -G` and keep `BatchMode=yes` and `StrictHostKeyChecking=yes`. Example values such as `vpn.example.invalid` and `example-user` are placeholders.
+
+## Use the command
+
 Open a new terminal after PATH is changed:
 
 ```powershell

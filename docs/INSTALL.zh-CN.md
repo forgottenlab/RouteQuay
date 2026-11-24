@@ -24,6 +24,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Yes -
 
 已安装副本的私有状态默认在 `%USERPROFILE%\.routequay\`，不放在程序目录里。开发目录仍使用 `local\private\cli-nodes`，除非该次命令传入 `--data-dir` 或设置了 `ROUTEQUAY_DATA_DIR`。不会自动迁移已有的仓库本地数据。
 
+## 操作员配置
+
+`routequay init-config` 在文件不存在时，把 `examples/operator-config.example.json` 复制到 `%USERPROFILE%\.routequay\config.json`。`init` 是同一命令。已有文件不会被覆盖，命令只打印路径。数据目录和文件只允许当前用户访问。
+
+模板没有口令字段。`sshAlias` 选择 `%USERPROFILE%\.ssh\config` 里已经存在的 OpenSSH 主机。`host`、`user`、`port` 和 `identityFile` 是可选项；`identityFile` 只保存密钥路径，不保存密钥内容。命令仍用 `ssh -G` 解析别名，并保持 `BatchMode=yes` 和 `StrictHostKeyChecking=yes`。`vpn.example.invalid` 和 `example-user` 只是占位符。
+
+## 使用命令
+
 修改 PATH 后请打开新的终端：
 
 ```powershell

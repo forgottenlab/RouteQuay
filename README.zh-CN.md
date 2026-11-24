@@ -46,7 +46,7 @@ npm run check
 .\routequay.cmd --help
 ```
 
-`.\vpncp.cmd` 仍然可用，并且运行同一程序。不停留在本仓库目录的当前用户安装见 [Windows 安装](docs/INSTALL.zh-CN.md)。尚未发布带版本号的 GitHub Release。
+`.\vpncp.cmd` 仍然可用，并且运行同一程序。不停留在本仓库目录的当前用户安装见 [Windows 安装](docs/INSTALL.zh-CN.md)。`routequay init-config` 会在操作员配置不存在时创建它，并且只打印路径。尚未发布带版本号的 GitHub Release。
 
 当前已验证的 Windows 管理端流程依赖可用的 OpenSSH 客户端、配置好的 SSH Host 别名、密钥认证及可信主机密钥记录；远端 Linux 还需通过工具的环境与权限检查。
 

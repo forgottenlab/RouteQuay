@@ -46,7 +46,7 @@ npm run check
 .\routequay.cmd --help
 ```
 
-`.\vpncp.cmd` remains available and runs the same program. A current-user install that does not require staying in this checkout is described in [Windows install](docs/INSTALL.md). Versioned GitHub Releases are not published yet.
+`.\vpncp.cmd` remains available and runs the same program. A current-user install that does not require staying in this checkout is described in [Windows install](docs/INSTALL.md). `routequay init-config` creates the operator config when it is missing and prints only that path. Versioned GitHub Releases are not published yet.
 
 For the validated Windows-based operator workflow, prerequisites include an available OpenSSH client, a configured SSH host alias, working key-based access and known host-key verification. The remote Linux host must meet the tool's supported environment and privilege checks.
 

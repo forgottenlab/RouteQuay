@@ -8,6 +8,7 @@ export const runtimeFiles = [
   'vpncp.ps1',
   'apps/cli/src/vpncp.ts',
   'packages/core/src/install-layout.ts',
+  'packages/core/src/operator-config.ts',
   'packages/core/src/xray-adoption.ts',
   'packages/core/src/xray-install.ts',
   'packages/core/src/linux-compatibility.ts',
@@ -21,6 +22,7 @@ export const runtimeFiles = [
   'packages/exporters/src/shadowrocket-real.ts',
   'packages/exporters/src/sing-box-json.ts',
   'packages/exporters/src/vless-qr.ts',
+  'examples/operator-config.example.json',
   'scripts/install.ps1',
   'scripts/install-win.mjs',
   'scripts/runtime-manifest.mjs'
