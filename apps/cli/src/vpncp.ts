@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { AdoptionError, runAdoption, type AdoptionOptions, type AdoptionResult } from '../../../packages/core/src/xray-adoption.ts';
+import { AdoptionError, createOpenSshTransport, runAdoption, type AdoptionOptions, type AdoptionResult } from '../../../packages/core/src/xray-adoption.ts';
 import { InstallLayoutError, resolveStateRoot } from '../../../packages/core/src/install-layout.ts';
-import { applyOperatorSshAlias, initOperatorConfig, operatorConfigPath, readOperatorConfig } from '../../../packages/core/src/operator-config.ts';
+import { applyOperatorSshAlias, initOperatorConfig, operatorConfigPath, operatorSshFiles, readOperatorConfig } from '../../../packages/core/src/operator-config.ts';
 import { isExportFormat } from '../../../packages/exporters/src/client-connection.ts';
-import { runSetup, type SetupOptions } from '../../../packages/core/src/xray-install.ts';
+import { createInstallTransport, runSetup, type SetupOptions } from '../../../packages/core/src/xray-install.ts';
 import { createInterface } from 'node:readline/promises';
 
 export const help = `routequay — 通过 OpenSSH 接管现有 Xray
@@ -19,7 +19,12 @@ export const help = `routequay — 通过 OpenSSH 接管现有 Xray
   routequay init-config
 
 默认 SSH Host 与 node 同名；接管后复用已保存的 Host。
-若用户配置里的节点写了 sshAlias，且命令没有 --ssh，则用该别名。host、user、port、identityFile 只作校验和记录，identityFile 是密钥路径而不是密钥内容。
+若用户配置里的节点写了 sshAlias，且命令没有 --ssh，则用该别名。
+ssh.configPath 会作为 ssh -F 传给 ssh -G 和随后的连接。指定 -F 后，OpenSSH 使用该文件，不再读取系统级 ssh_config。省略 configPath 则不传 -F。
+节点 identityFile 只写密钥路径。实际连接追加 ssh -i 和 IdentitiesOnly=yes，从而设置 IdentityFile；ssh -G 不带 -i，也不读取密钥内容。省略 identityFile 则不传 -i。
+host、user、port、knownHostsPath、authMethod 仍只作校验和记录。主机、用户和端口以 ssh -G 为准，并由命令行固定。
+BatchMode=yes、StrictHostKeyChecking=yes、ForwardAgent=no、ClearAllForwardings=yes 固定在命令行上，配置文件不能改松。
+这两个路径必须是已存在的普通文件，不能是符号链接。POSIX 上密钥文件不能对组或其他用户可读。空的或过大的密钥和配置文件也会被拒绝。上述情况都在启动 ssh 之前失败，终端只给出错误码。
 init-config 在用户数据目录创建 config.json。文件已存在时拒绝覆盖，退出码 2，并且只打印路径。init 是同一命令。
 setup 接管已有实例；干净 Debian 13 / Ubuntu 24.04 LTS 可安装固定 Xray 26.11.9。
 自动识别架构、systemd、包管理器及文件权限能力；缺依赖时停止，不自动安装包。
@@ -141,15 +146,16 @@ export async function main(args = process.argv.slice(2), env: NodeJS.ProcessEnv 
     const options = parseArguments(args);
     const config = readOperatorConfig(operatorConfigPath(env));
     const command = applyOperatorSshAlias(options, config);
+    const sshFiles = operatorSshFiles(config, command.nodeId);
     const root = resolveStateRoot(programRoot, { dataDir: command.dataDir, configuredDataDir: config?.dataDir, env });
-    const result = command.command === 'setup' ? await runSetup(command, root, undefined,
+    const result = command.command === 'setup' ? await runSetup(command, root, createInstallTransport(sshFiles),
       process.stdin.isTTY && !options.json ? async plan => {
         console.log(`安装 Xray ${plan.version} · 节点 ${plan.nodeId} · TCP ${plan.port} · REALITY ${plan.realityTarget}`);
         console.log('将创建服务账号、配置和 systemd unit，保存恢复记录；防火墙规则需自行核对。');
         const prompt = createInterface({ input: process.stdin, output: process.stdout });
         try { return /^y(?:es)?$/i.test((await prompt.question('执行此安装计划？[y/N] ')).trim()); }
         finally { prompt.close(); }
-      } : undefined) : runAdoption(command, root);
+      } : undefined) : runAdoption(command, root, createOpenSshTransport(sshFiles));
     if (command.json) console.log(JSON.stringify(result));
     else console.log(renderHumanResult(result));
     return result.code ? (['unknown', 'failed-restored', 'rollback-failed', 'installed-local-state-incomplete',

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { main } from '../src/vpncp.ts';
+import { help, main } from '../src/vpncp.ts';
 
 const importScheme = `${'vle'}${'ss'}://`;
 
@@ -49,6 +49,44 @@ test('init-config prints only the new path and refuses to overwrite or print the
   const forced = await capture({ ...process.env, ROUTEQUAY_CONFIG: join(dir, 'third.json') }, ['init-config', '--force']);
   assert.equal(forced.code, 2);
   assert.match(forced.logs.join('\n'), /UNKNOWN_OPTION/);
+});
+
+test('help tells operators how to point at an SSH config and a key path', () => {
+  assert.equal(help.includes('ssh -F'), true);
+  assert.equal(help.includes('ssh -i'), true);
+  assert.equal(help.includes('IdentitiesOnly=yes'), true);
+  assert.equal(help.includes('identityFile'), true);
+  assert.equal(help.includes('StrictHostKeyChecking=yes'), true);
+  assert.equal(help.includes('vless://'), false);
+  assert.equal(help.includes('BEGIN '), false);
+  assert.equal(help.includes('IdentityFile='), false);
+});
+
+test('pull still stops before SSH when node state is missing and does not print SSH paths', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'routequay-ssh-files-'));
+  const configPath = join(dir, 'config.json');
+  const keyPath = join(dir, 'fixture-identity');
+  const sshConfig = join(dir, 'fixture-ssh-config');
+  writeFileSync(configPath, JSON.stringify({
+    schemaVersion: 'routequay-operator-config-v1',
+    ssh: { configPath: sshConfig },
+    nodes: [{ id: 'example-node', sshAlias: 'example-node', identityFile: keyPath }]
+  }));
+  const env = { ...process.env, ROUTEQUAY_CONFIG: configPath };
+  const result = await capture(env, ['pull', 'example-node', '--data-dir', dir, '--json']);
+  assert.equal(result.code, 2);
+  assert.equal(JSON.parse(result.logs[0] ?? '').code, 'SETUP_REQUIRED');
+  const human = await capture(env, ['pull', 'example-node', '--data-dir', dir]);
+  assert.equal(human.code, 2);
+  assert.match(human.logs.join('\n'), /SETUP_REQUIRED/);
+  for (const logs of [result.logs, human.logs]) {
+    const text = logs.join('\n');
+    assert.equal(text.includes(keyPath), false);
+    assert.equal(text.includes(sshConfig), false);
+    assert.equal(text.includes('fixture-identity'), false);
+    assert.equal(text.includes('BEGIN '), false);
+    assert.equal(text.includes(importScheme), false);
+  }
 });
 
 test('an invalid operator config fails before SSH and does not echo the file', async () => {

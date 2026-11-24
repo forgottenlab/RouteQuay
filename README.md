@@ -57,6 +57,8 @@ That command updates program files in the existing destination. It does not dele
 
 For the validated Windows-based operator workflow, prerequisites include an available OpenSSH client, a configured SSH host alias, working key-based access and known host-key verification. The remote Linux host must meet the tool's supported environment and privilege checks.
 
+`ssh.configPath` in the operator config is passed as `ssh -F` to both `ssh -G` and the connection. A node's `identityFile` is a key path; the connection receives it as `ssh -i` together with `IdentitiesOnly=yes`. Omit either field to keep OpenSSH's default config lookup and key selection. `BatchMode=yes` and `StrictHostKeyChecking=yes` stay on the command line. See the [install notes](docs/INSTALL.md).
+
 The validated management environment is Windows with PowerShell and OpenSSH. Remote first-install targets are Debian 13 and Ubuntu 24.04 on x86_64; aarch64 selection has local coverage only. A remote clean host needs systemd, root or non-interactive sudo, Python 3, curl, OpenSSL and the existing tools checked by the installer. Missing tools stop the operation; packages are not auto-installed.
 
 ## 🖥️ CLI quick reference
