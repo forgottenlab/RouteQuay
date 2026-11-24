@@ -24,6 +24,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Yes -
 
 Private state for an installed copy defaults to `%USERPROFILE%\.routequay\`. It is not stored under the program directory. A development checkout keeps using `local\private\cli-nodes` unless that command is given `--data-dir` or `ROUTEQUAY_DATA_DIR`. Existing checkout data is not migrated.
 
+If dependency installation fails, the command prints one JSON object. `code` is `NPM_CI_FAILED` and `reason` is the spawn error or a short npm transcript, with secrets, import URIs, and private-key blocks removed. The install marker is not written and PATH is not changed. Program files may already have been copied; clear that directory before installing again, or the next run reports `DEST_NOT_EMPTY`.
+
 ## Operator config
 
 `routequay init-config` copies `examples/operator-config.example.json` to `%USERPROFILE%\.routequay\config.json` when that file is missing. `init` is the same command. An existing file is left unchanged, and the command prints the path only. The data directory and file are private to the current user.

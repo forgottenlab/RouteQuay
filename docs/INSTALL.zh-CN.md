@@ -24,6 +24,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Yes -
 
 已安装副本的私有状态默认在 `%USERPROFILE%\.routequay\`，不放在程序目录里。开发目录仍使用 `local\private\cli-nodes`，除非该次命令传入 `--data-dir` 或设置了 `ROUTEQUAY_DATA_DIR`。不会自动迁移已有的仓库本地数据。
 
+依赖安装失败时，输出是一行 JSON：`code` 为 `NPM_CI_FAILED`，`reason` 是 spawn 错误或 npm 的简短输出，并会去掉密钥、URI 和私钥块。此时不写入安装标记，也不修改 PATH。程序目录里可能已经有复制出来的文件；再次安装前需要清空该目录，否则会得到 `DEST_NOT_EMPTY`。
+
 ## 操作员配置
 
 `routequay init-config` 在文件不存在时，把 `examples/operator-config.example.json` 复制到 `%USERPROFILE%\.routequay\config.json`。`init` 是同一命令。已有文件不会被覆盖，命令只打印路径。数据目录和文件只允许当前用户访问。

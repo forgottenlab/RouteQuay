@@ -107,6 +107,8 @@ Linux、Node.js v22.23.4 上执行 `npm ci --ignore-scripts --no-audit --no-fund
 
 `npm run test:installer` 在临时目录检查精简运行包的安装、当前用户 PATH 垫片解析、更新和卸载。更新与卸载不得改动单独的用户数据目录。测试不连接 SSH，不写注册表，也不安装 Node.js。PowerShell 入口由同一套 Node 安装逻辑执行；脚本本身在 Linux 检查里只做文本约束（确认后才改当前用户 PATH、不改系统级 PATH、不删除用户配置）。Windows ACL 仍由既有的私有路径助手负责，本项测试不把它记成已经在 Windows 上执行。
 
+`npm ci` 在 Windows 上不能直接 `spawn` / `spawnSync` 一个 `.cmd` 或 `.bat`。Node.js 在没有 `shell` 时会返回 `EINVAL`；Volta 这类 `npm.cmd` 会走到这条路径。安装器改为通过 `cmd.exe /d /s /c` 运行 `npm.cmd` 和固定的 `ci` 参数。失败结果除 `NPM_CI_FAILED` 外还带删减后的 `reason`。测试断言这条调用形状，并用临时目录里的假 `npm` 走一遍不带 `--skip-npm` 的安装。Linux 检查不执行 PowerShell，也不执行真实 `.cmd`，也不碰真实用户配置目录。
+
 ## 测试安全
 
 不得使用真实 SSH 密钥和客户端凭据作为 CI fixtures。使用测试用合成节点、临时路径和 mock transport。远端 `setup`、服务重启和云资源清理必须获得单独授权。
