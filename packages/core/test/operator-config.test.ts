@@ -24,16 +24,18 @@ test('the committed operator template is placeholder data with no password field
   const config = validateOperatorConfig(JSON.parse(raw));
   assert.equal(config.schemaVersion, 'routequay-operator-config-v1');
   assert.equal(config.dataDir, '~/.routequay');
-  assert.equal(config.ssh?.configPath, '~/.ssh/config');
+  assert.equal(config.ssh, undefined);
   assert.equal(config.nodes[0]?.id, 'example-node');
   assert.equal(config.nodes[0]?.sshAlias, 'example-node');
   assert.equal(config.nodes[0]?.host, 'vpn.example.invalid');
   assert.equal(config.nodes[0]?.user, 'example-user');
   assert.equal(config.nodes[0]?.port, 22);
-  assert.equal(config.nodes[0]?.identityFile, '~/.ssh/id_ed25519_example');
+  assert.equal(config.nodes[0]?.identityFile, undefined);
   assert.equal(config.nodes[0]?.authMethod, 'ssh-config');
   assert.equal(config.nodes[0]?.displayName, 'Example node');
-  for (const word of ['password', 'passphrase', 'BEGIN ', importScheme]) assert.equal(raw.includes(word), false);
+  for (const word of ['password', 'passphrase', 'BEGIN ', importScheme, 'configPath', 'identityFile', 'id_ed25519', '.ssh']) {
+    assert.equal(raw.includes(word), false);
+  }
 });
 
 test('validation accepts an alias-only node and rejects secrets, unknown keys, and bad endpoints', () => {
@@ -120,12 +122,17 @@ test('a missing config is absent, an invalid config is refused, and sshAlias doe
 test('ssh -F and identity file are applied as paths, and unsafe files fail before ssh', () => {
   const dir = tempDir();
   const home = join(dir, 'home');
-  const config = validateOperatorConfig(template());
+  const source = template();
+  (source.nodes as Array<Record<string, unknown>>)[0].identityFile = '~/.ssh/id_ed25519_example';
+  source.ssh = { configPath: '~/.ssh/config' };
+  const config = validateOperatorConfig(source);
   const files = operatorSshFiles(config, 'example-node', home);
   assert.deepEqual(files, {
     configFile: join(home, '.ssh', 'config'),
     identityFile: join(home, '.ssh', 'id_ed25519_example')
   });
+  assert.equal(operatorSshFiles(validateOperatorConfig(template()), 'example-node', home).configFile, undefined);
+  assert.equal(operatorSshFiles(validateOperatorConfig(template()), 'example-node', home).identityFile, undefined);
   assert.equal(operatorSshFiles(null, 'example-node', home).configFile, undefined);
   assert.equal(operatorSshFiles(config, 'other-node', home).identityFile, undefined);
   assert.equal(operatorSshFiles(config, 'other-node', home).configFile, files.configFile);

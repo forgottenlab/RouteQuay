@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { clientConnectionSpec, defaultExportFileName, exportFormats, isExportFormat, validateClientExportFields, type ExportFormat } from '../../exporters/src/client-connection.ts';
 import { renderClientExport } from '../../exporters/src/mihomo-yaml.ts';
 import { renderVlessQrPng } from '../../exporters/src/vless-qr.ts';
+import { buildClientAppend, buildClientChangeScript, canonicalDigest, describeClientAppend, isLocalLabel, type ClientChangePayload } from './xray-client.ts';
 
 type ExportBody = string | Buffer;
 import { supportsFirstInstallPlatform, type LinuxEnvironment } from './linux-compatibility.ts';
@@ -30,9 +31,11 @@ export type Probe = {
   config: any; listeners: string[]; diskMatchesRunning: boolean; layout?: string;
   install?: import('./xray-install.ts').InstallInspection;
 };
+export type ClientApplyStatus = 'ROUTEQUAY_CLIENT_APPLIED' | 'ROUTEQUAY_CLIENT_RESTORED' | 'ROUTEQUAY_CLIENT_REFUSED' | 'ROUTEQUAY_CLIENT_ROLLBACK_FAILED';
 export interface AdoptionTransport {
   resolve(alias: string): SshTarget;
   probe(target: SshTarget): Probe;
+  applyClient?(target: SshTarget, payload: ClientChangePayload): { status: ClientApplyStatus };
 }
 function fail(code: string, exitCode = 2): never { throw new AdoptionError(code, exitCode); }
 export function parseSshConfig(alias: string, output: string): SshTarget {
@@ -91,6 +94,16 @@ export function createOpenSshTransport(files: SshClientFiles = {}): AdoptionTran
       try { body = JSON.parse(result.stdout); } catch { fail('REMOTE_RESPONSE_INVALID', 4); }
       if (!body.ok) fail(body.code === 'ROOT_OR_SUDO_REQUIRED' ? 'ROOT_OR_SUDO_REQUIRED' : 'REMOTE_LAYOUT_OR_PERMISSION_UNAVAILABLE', 4);
       return body.probe;
+    },
+    applyClient(target, payload) {
+      const script = buildClientChangeScript(payload);
+      if (!script) fail('TRANSACTION_ID_INVALID');
+      const result = spawnSync('ssh', [...prepareSshConnect(target, files),
+        'if [ "$(id -u)" = 0 ]; then bash -s; else sudo -n env SSH_CONNECTION="$SSH_CONNECTION" bash -s; fi'],
+        { input: script, encoding: 'utf8', windowsHide: true, timeout: 120000, maxBuffer: 64 * 1024 });
+      const marker = (result.stdout ?? '').trim();
+      const allowed: ClientApplyStatus[] = ['ROUTEQUAY_CLIENT_APPLIED', 'ROUTEQUAY_CLIENT_RESTORED', 'ROUTEQUAY_CLIENT_REFUSED', 'ROUTEQUAY_CLIENT_ROLLBACK_FAILED'];
+      return { status: allowed.includes(marker as ClientApplyStatus) ? marker as ClientApplyStatus : 'ROUTEQUAY_CLIENT_ROLLBACK_FAILED' };
     }
   };
 }
@@ -228,11 +241,14 @@ export function privateWrite(path: string, data: string, replace = false): void 
   } finally { if (existsSync(temporary)) unlinkSync(temporary); }
 }
 type State = { schemaVersion: string; nodeId: string; target: SshTarget; hash: string; probe: Probe };
-export type AdoptionOptions = { command: 'setup' | 'status' | 'export' | 'endpoint' | 'pull'; nodeId: string; ssh?: string;
-  expectedHost?: string; plan?: boolean; json?: boolean; out?: string; client?: string; to?: string; dataDir?: string };
+export type AdoptionOptions = { command: 'setup' | 'status' | 'export' | 'endpoint' | 'pull' | 'add-client'; nodeId: string; ssh?: string;
+  expectedHost?: string; plan?: boolean; apply?: boolean; json?: boolean; out?: string; client?: string; to?: string; dataDir?: string;
+  inbound?: string; name?: string; ownerLabel?: string; remark?: string; };
 export type AdoptionResult = { schemaVersion: string; nodeId: string; operation: string; status: string;
   changed: boolean; checkedAt: string; [key: string]: unknown };
-const digest = (config: unknown) => createHash('sha256').update(JSON.stringify(config)).digest('hex');
+export function configDigest(config: unknown): string {
+  return createHash('sha256').update(JSON.stringify(config)).digest('hex');
+}
 
 // Shared by endpoint commits and exports, including the entire export probe.
 function withNodeLock(directory: string, action: () => AdoptionResult): AdoptionResult {
@@ -298,17 +314,18 @@ export function verifiedAdoptedTarget(nodeId: string, root: string, resolved: Ss
       || state.target.hostKeyAlias !== (previous.hostKeyAlias ?? previous.host)) fail('SSH_TARGET_CHANGED', 3);
   const target = { ...resolved, hostKeyAlias: state.target.hostKeyAlias };
   const probe = transport.probe(target);
-  if (!probe.config || digest(probe.config) !== state.hash) fail('REMOTE_BASELINE_CHANGED', 3);
+  if (!probe.config || configDigest(probe.config) !== state.hash) fail('REMOTE_BASELINE_CHANGED', 3);
   if (probe.service !== 'active' || !probe.diskMatchesRunning) fail('RUNNING_CONFIG_UNVERIFIED', 3);
   if (readFileSync(path, 'utf8') !== original) fail('LOCAL_STATE_CHANGED', 3);
   return target;
 }
 
 export function runAdoption(options: AdoptionOptions, root = '.', transport = openSshTransport): AdoptionResult {
-  if (options.command === 'export' || options.command === 'pull') {
+  if (options.command === 'export' || options.command === 'pull' || options.command === 'add-client') {
     if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(options.nodeId)) fail('NODE_ID_INVALID');
     const directory = resolve(root, 'local/private/cli-nodes', options.nodeId);
     if (!existsSync(join(directory, 'state.local.json'))) fail('SETUP_REQUIRED');
+    if (options.command === 'add-client' && options.plan) return runAdoptionLocked(options, root, transport);
     return withNodeLock(directory, () => runAdoptionLocked(options, root, transport));
   }
   return runAdoptionLocked(options, root, transport);
@@ -362,10 +379,13 @@ function runAdoptionLocked(options: AdoptionOptions, root: string, transport: Ad
   result.status = probe.service === 'active' ? (state ? 'managed' : 'installed-running') : 'installed-stopped';
   result.diskMatchesRunning = probe.diskMatchesRunning;
   if (options.command === 'status') return result;
+  if (options.command === 'add-client') {
+    return completeAddClient({ options, root, transport, directory, statePath, state, originalState, target, resolved, probe, result, sameConnection });
+  }
   if (!candidates.length) fail('NO_SUPPORTED_CLIENT');
-  const hash = digest(probe.config);
+  const hash = configDigest(probe.config);
   if (options.command === 'setup') {
-    if (options.plan) return { ...result, status: 'planned', action: state?.hash === hash ? 'unchanged' : 'adopt' };
+    if (options.plan) return { ...result, status: 'planned', action: state?.hash === configDigest(probe.config) ? 'unchanged' : 'adopt' };
     if (state?.hash === hash) {
       privateDirectory(directory);
       protectPrivatePath(statePath, false);
@@ -385,7 +405,7 @@ function runAdoptionLocked(options: AdoptionOptions, root: string, transport: Ad
     });
   }
   if (!state) fail('SETUP_REQUIRED');
-  if (state.hash !== hash) fail('REMOTE_BASELINE_CHANGED', 3);
+  if (state.hash !== configDigest(probe.config)) fail('REMOTE_BASELINE_CHANGED', 3);
   if (probe.service !== 'active' || !probe.diskMatchesRunning) fail('RUNNING_CONFIG_UNVERIFIED', 3);
   if (updating) {
     // Only this single state file changes. The install journal and snapshots remain historical.
@@ -427,36 +447,252 @@ function runAdoptionLocked(options: AdoptionOptions, root: string, transport: Ad
   if (readFileSync(statePath, 'utf8') !== originalState) fail('LOCAL_STATE_CHANGED', 3);
   if (!sameConnection(transport.resolve(target.alias), resolved)) fail('SSH_TARGET_CHANGED', 3);
   if (options.command === 'pull') {
-    const targetDirectory = options.out ? resolve(options.out) : directory;
-    if (options.out) {
-      assertNoLinks(targetDirectory);
-      if (!existsSync(targetDirectory)) fail('OUTPUT_DIRECTORY_MISSING');
-      const current = lstatSync(targetDirectory);
-      if (current.isSymbolicLink() || !current.isDirectory()) fail('PRIVATE_PATH_UNSAFE');
-    }
-    privateDirectory(targetDirectory);
-    const planned = exportFormats.map(format => ({
-      format,
-      output: resolve(join(targetDirectory, defaultExportFileName(selected.ref, format))),
-      body: renderExportBody(format, spec)
-    }));
-    for (const file of planned) assertNoLinks(file.output);
-    const outputFiles = planned.map(file => ({
-      format: exportFormatLabel(file.format),
-      path: file.output,
-      status: commitBringBackFile(file.output, file.body)
-    }));
-    const outputFile = outputFiles.find(file => file.format === 'vless-uri')?.path;
-    const changed = outputFiles.some(file => file.status === 'exported');
-    return { ...result, status: changed ? 'exported' : 'unchanged', changed, outputFile, outputFiles,
-      outputDirectory: targetDirectory, client: selected.ref, formats: outputFiles.map(file => file.format),
-      fingerprint: 'chrome' };
+    const wrote = writeBringBackFiles(directory, options.out, selected.ref, spec);
+    return { ...result, status: wrote.changed ? 'exported' : 'unchanged', changed: wrote.changed, outputFile: wrote.outputFile,
+      outputFiles: wrote.outputFiles, outputDirectory: wrote.outputDirectory, client: selected.ref,
+      formats: wrote.formats, fingerprint: 'chrome' };
   }
   const body = renderExportBody(exportFormat, spec);
   const output = resolve(options.out ?? join(directory, defaultExportFileName(selected.ref, exportFormat)));
   const wrote = commitExportFile(directory, output, body, Boolean(options.out));
   return { ...result, status: wrote, changed: wrote === 'exported', outputFile: output, client: selected.ref,
     format: exportFormatLabel(exportFormat), fingerprint: 'chrome' };
+}
+type ClientSpec = ReturnType<typeof clientConnectionSpec>;
+function writeBringBackFiles(directory: string, out: string | undefined, ref: string, spec: ClientSpec): {
+  changed: boolean; outputFile?: string; outputFiles: Array<{ format: string; path: string; status: string }>;
+  outputDirectory: string; formats: string[];
+} {
+  const targetDirectory = out ? resolve(out) : directory;
+  if (out) {
+    assertNoLinks(targetDirectory);
+    if (!existsSync(targetDirectory)) fail('OUTPUT_DIRECTORY_MISSING');
+    const current = lstatSync(targetDirectory);
+    if (current.isSymbolicLink() || !current.isDirectory()) fail('PRIVATE_PATH_UNSAFE');
+  }
+  privateDirectory(targetDirectory);
+  const planned = exportFormats.map(format => ({
+    format,
+    output: resolve(join(targetDirectory, defaultExportFileName(ref, format))),
+    body: renderExportBody(format, spec)
+  }));
+  for (const file of planned) assertNoLinks(file.output);
+  const outputFiles = planned.map(file => ({
+    format: exportFormatLabel(file.format),
+    path: file.output,
+    status: commitBringBackFile(file.output, file.body)
+  }));
+  return { changed: outputFiles.some(file => file.status === 'exported'),
+    outputFile: outputFiles.find(file => file.format === 'vless-uri')?.path, outputFiles,
+    outputDirectory: targetDirectory, formats: outputFiles.map(file => file.format) };
+}
+const metadataSchema = 'routequay-client-metadata-v1';
+const journalSchema = 'routequay-client-change-v1';
+const clientRefPattern = /^inbound-[1-9]\d*-client-[1-9]\d*$/;
+type ClientMetaEntry = { ref: string; ownerLabel?: string; remark?: string };
+type ClientMetadata = { schemaVersion: typeof metadataSchema; nodeId: string; clients: ClientMetaEntry[] };
+type ClientJournal = { schemaVersion: typeof journalSchema; id: string; nodeId: string; baselineCanonical: string;
+  expectedCanonical: string; inboundIndex: number; clientIndex: number; configPath: string; port: number };
+function labelText(value: string | undefined, code: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (!isLocalLabel(value)) fail(code);
+  return value;
+}
+function readClientMetadata(path: string, nodeId: string): ClientMetadata | undefined {
+  if (!existsSync(path)) return undefined;
+  assertNoLinks(path);
+  let parsed: unknown;
+  try { parsed = JSON.parse(readFileSync(path, 'utf8')); } catch { fail('METADATA_INVALID'); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) fail('METADATA_INVALID');
+  const input = parsed as Record<string, unknown>;
+  if (Object.keys(input).some(key => !['schemaVersion', 'nodeId', 'clients'].includes(key))) fail('METADATA_INVALID');
+  if (input.schemaVersion !== metadataSchema || input.nodeId !== nodeId || !Array.isArray(input.clients)) fail('METADATA_INVALID');
+  const clients: ClientMetaEntry[] = [];
+  for (const item of input.clients) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) fail('METADATA_INVALID');
+    const entry = item as Record<string, unknown>;
+    if (Object.keys(entry).some(key => !['ref', 'ownerLabel', 'remark'].includes(key))) fail('METADATA_INVALID');
+    if (typeof entry.ref !== 'string' || !clientRefPattern.test(entry.ref)) fail('METADATA_INVALID');
+    const stored: ClientMetaEntry = { ref: entry.ref };
+    if (entry.ownerLabel !== undefined) {
+      if (typeof entry.ownerLabel !== 'string' || !isLocalLabel(entry.ownerLabel)) fail('METADATA_INVALID');
+      stored.ownerLabel = entry.ownerLabel;
+    }
+    if (entry.remark !== undefined) {
+      if (typeof entry.remark !== 'string' || !isLocalLabel(entry.remark)) fail('METADATA_INVALID');
+      stored.remark = entry.remark;
+    }
+    if (!stored.ownerLabel && !stored.remark) fail('METADATA_INVALID');
+    clients.push(stored);
+  }
+  return { schemaVersion: metadataSchema, nodeId, clients };
+}
+function storeClientMetadata(path: string, nodeId: string, ref: string, ownerLabel?: string, remark?: string): string | undefined {
+  if (!ownerLabel && !remark) return undefined;
+  const current = readClientMetadata(path, nodeId) ?? { schemaVersion: metadataSchema, nodeId, clients: [] };
+  const entry: ClientMetaEntry = { ref, ...(ownerLabel ? { ownerLabel } : {}), ...(remark ? { remark } : {}) };
+  const clients = [...current.clients.filter(item => item.ref !== ref), entry];
+  privateWrite(path, `${JSON.stringify({ schemaVersion: metadataSchema, nodeId, clients })}\n`, true);
+  return path;
+}
+function readClientJournal(path: string, nodeId: string): ClientJournal | undefined {
+  if (!existsSync(path)) return undefined;
+  assertNoLinks(path);
+  let parsed: unknown;
+  try { parsed = JSON.parse(readFileSync(path, 'utf8')); } catch { fail('CLIENT_CHANGE_RECOVERY_REQUIRED', 3); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) fail('CLIENT_CHANGE_RECOVERY_REQUIRED', 3);
+  const input = parsed as Record<string, unknown>;
+  const keys = ['schemaVersion', 'id', 'nodeId', 'baselineCanonical', 'expectedCanonical', 'inboundIndex', 'clientIndex', 'configPath', 'port'];
+  if (Object.keys(input).some(key => !keys.includes(key))) fail('CLIENT_CHANGE_RECOVERY_REQUIRED', 3);
+  const hash = (value: unknown) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+  if (input.schemaVersion !== journalSchema || input.nodeId !== nodeId || typeof input.id !== 'string' || !/^[a-f0-9]{32}$/.test(input.id)
+      || !hash(input.baselineCanonical) || !hash(input.expectedCanonical)
+      || !Number.isInteger(input.inboundIndex) || Number(input.inboundIndex) < 0
+      || !Number.isInteger(input.clientIndex) || Number(input.clientIndex) < 0
+      || typeof input.configPath !== 'string' || !input.configPath.startsWith('/')
+      || !Number.isInteger(input.port) || Number(input.port) < 1 || Number(input.port) > 65535) {
+    fail('CLIENT_CHANGE_RECOVERY_REQUIRED', 3);
+  }
+  return input as ClientJournal;
+}
+function removeClientJournal(path: string): void {
+  if (!existsSync(path)) return;
+  assertNoLinks(path);
+  unlinkSync(path);
+}
+function remoteConfigPath(probe: Probe): string {
+  if (typeof probe.configPath !== 'string' || !probe.configPath.startsWith('/') || probe.configPath.length > 240
+      || /[\u0000-\u001f]/.test(probe.configPath)) fail('LAYOUT_UNSUPPORTED');
+  return probe.configPath;
+}
+function clientSpec(nodeId: string, target: SshTarget, probe: Probe, inboundIndex: number, clientIndex: number, ref: string): ClientSpec {
+  const config = probe.config;
+  const inbound = config?.inbounds?.[inboundIndex];
+  const client = inbound?.settings?.clients?.[clientIndex];
+  if (!inbound || !client || typeof client.id !== 'string') fail('CLIENT_CHANGE_UNVERIFIED', 3);
+  const reality = inbound.streamSettings?.realitySettings && typeof inbound.streamSettings.realitySettings === 'object'
+    ? inbound.streamSettings.realitySettings : {};
+  const fields = validateClientExportFields({
+    network: inbound.streamSettings?.network ?? 'tcp', flow: client.flow, serverNames: reality.serverNames,
+    shortIds: reality.shortIds, decryption: inbound.settings?.decryption
+  });
+  if (!fields.ok) fail(fields.code);
+  if (!probe.listeners.some(address => address.endsWith(`:${inbound.port}`))) fail('INBOUND_NOT_LISTENING');
+  return clientConnectionSpec({
+    nodeId, clientRef: ref, server: target.host, port: inbound.port, uuid: client.id,
+    publicKey: realityPublicKey(reality.privateKey), network: fields.network, flow: fields.flow,
+    serverName: fields.serverName, shortId: fields.shortId, encryption: fields.encryption
+  });
+}
+function rememberAdoptedConfig(directory: string, statePath: string, nodeId: string, target: SshTarget, probe: Probe): void {
+  const hash = configDigest(probe.config);
+  const data = JSON.stringify({ schemaVersion: 'vpncp-adoption-v1', nodeId, target, hash, probe } satisfies State);
+  const snapshot = join(directory, `${hash}.snapshot.local.json`);
+  if (!existsSync(snapshot)) privateWrite(snapshot, data);
+  privateWrite(statePath, data, true);
+}
+type AddClientContext = { options: AdoptionOptions; root: string; transport: AdoptionTransport; directory: string;
+  statePath: string; state: State | undefined; originalState: string | undefined; target: SshTarget; resolved: SshTarget;
+  probe: Probe; result: AdoptionResult; sameConnection: (a: SshTarget, b: SshTarget) => boolean };
+function completeAddClient(input: AddClientContext): AdoptionResult {
+  const { options, transport, directory, statePath, state, originalState, target, resolved, probe, result, sameConnection } = input;
+  if (!state || !originalState) fail('SETUP_REQUIRED');
+  if (result.supportLevels && typeof result.supportLevels === 'object') {
+    (result.supportLevels as { configurationChanges: string }).configurationChanges = 'append-vless-client';
+  }
+  const ownerLabel = labelText(options.ownerLabel, 'CLIENT_LABEL_INVALID');
+  const remark = labelText(options.remark, 'CLIENT_LABEL_INVALID');
+  const metadataPath = join(directory, 'clients.local.json');
+  const journalPath = join(directory, 'client-change.local.json');
+  const journal = readClientJournal(journalPath, options.nodeId);
+  const currentCanonical = canonicalDigest(probe.config);
+  const finishRef = journal ? `inbound-${journal.inboundIndex + 1}-client-${journal.clientIndex + 1}` : undefined;
+  if (journal && journal.expectedCanonical === currentCanonical && finishRef) {
+    if (options.plan) {
+      return { ...result, status: 'planned', changed: false, client: finishRef, plan: {
+        action: 'finish-client', inbound: `inbound-${journal.inboundIndex + 1}`, client: finishRef,
+        preservesExistingClients: true, rotatesReality: false, changesMinClientVer: false } };
+    }
+    if (!options.apply) fail('CLIENT_APPROVAL_REQUIRED');
+    return finishLandedClient(input, journal, probe, metadataPath, journalPath, ownerLabel, remark);
+  }
+  if (journal && journal.baselineCanonical !== currentCanonical) fail('CLIENT_CHANGE_RECOVERY_REQUIRED', 3);
+  if (configDigest(probe.config) !== state.hash) fail('REMOTE_BASELINE_CHANGED', 3);
+  const described = describeClientAppend(probe.config, { inbound: options.inbound, name: options.name });
+  if (!described.ok) fail(described.code);
+  const plan = { action: 'add-client', inbound: described.selection.inboundRef, client: described.selection.clientRef,
+    preservesExistingClients: true, rotatesReality: false, changesMinClientVer: false };
+  if (options.plan) return { ...result, status: 'planned', changed: false, client: described.selection.clientRef, plan };
+  if (!options.apply) fail('CLIENT_APPROVAL_REQUIRED');
+  if (probe.service !== 'active' || !probe.diskMatchesRunning) fail('RUNNING_CONFIG_UNVERIFIED', 3);
+  readClientMetadata(metadataPath, options.nodeId);
+  const configPath = remoteConfigPath(probe);
+  const inbound = probe.config.inbounds[described.selection.inboundIndex];
+  if (!probe.listeners.some((address: string) => address.endsWith(`:${inbound.port}`))) fail('INBOUND_NOT_LISTENING');
+  if (readFileSync(statePath, 'utf8') !== originalState) fail('LOCAL_STATE_CHANGED', 3);
+  if (!sameConnection(transport.resolve(target.alias), resolved)) fail('SSH_TARGET_CHANGED', 3);
+  const built = buildClientAppend(probe.config, { inbound: options.inbound, name: options.name });
+  if (!built.ok) fail(built.code);
+  if (journal) removeClientJournal(journalPath);
+  const jobId = randomUUID().replaceAll('-', '');
+  const nextJournal: ClientJournal = { schemaVersion: journalSchema, id: jobId, nodeId: options.nodeId,
+    baselineCanonical: currentCanonical, expectedCanonical: built.plan.canonicalHash,
+    inboundIndex: built.plan.inboundIndex, clientIndex: built.plan.clientIndex, configPath, port: inbound.port };
+  privateWrite(journalPath, JSON.stringify(nextJournal), true);
+  const again = transport.probe(target);
+  if (canonicalDigest(again.config) !== currentCanonical) fail('REMOTE_BASELINE_CHANGED', 3);
+  if (!transport.applyClient) fail('CLIENT_CHANGE_UNSUPPORTED', 4);
+  const payload: ClientChangePayload = { jobId, inboundIndex: built.plan.inboundIndex, port: inbound.port, configPath,
+    baseline: structuredClone(probe.config), next: built.plan.next };
+  const applied = transport.applyClient(target, payload);
+  const fresh = transport.probe(target);
+  const freshCanonical = canonicalDigest(fresh.config);
+  if (applied.status === 'ROUTEQUAY_CLIENT_APPLIED' && freshCanonical === built.plan.canonicalHash) {
+    return finishLandedClient(input, nextJournal, fresh, metadataPath, journalPath, ownerLabel, remark);
+  }
+  if ((applied.status === 'ROUTEQUAY_CLIENT_RESTORED' || applied.status === 'ROUTEQUAY_CLIENT_REFUSED') && freshCanonical === currentCanonical) {
+    removeClientJournal(journalPath);
+    fail(applied.status === 'ROUTEQUAY_CLIENT_REFUSED' ? 'CLIENT_CHANGE_REFUSED' : 'CLIENT_CHANGE_RESTORED',
+      applied.status === 'ROUTEQUAY_CLIENT_REFUSED' ? 3 : 4);
+  }
+  fail('CLIENT_CHANGE_UNKNOWN', 4);
+}
+function finishLandedClient(input: AddClientContext, journal: ClientJournal, probe: Probe, metadataPath: string,
+  journalPath: string, ownerLabel?: string, remark?: string): AdoptionResult {
+  const { options, directory, statePath, target, result } = input;
+  const ref = `inbound-${journal.inboundIndex + 1}-client-${journal.clientIndex + 1}`;
+  rememberAdoptedConfig(directory, statePath, options.nodeId, target, probe);
+  let metadataFile: string | undefined;
+  try { metadataFile = storeClientMetadata(metadataPath, options.nodeId, ref, ownerLabel, remark); }
+  catch (error) {
+    if (!(error instanceof AdoptionError)) throw error;
+    return { ...result, status: 'client-added-local-handoff-failed', changed: true, code: 'CLIENT_LOCAL_HANDOFF_FAILED',
+      localHandoffCode: error.code, client: ref };
+  }
+  result.service = probe.service;
+  result.diskMatchesRunning = probe.diskMatchesRunning;
+  result.listeners = probe.listeners;
+  result.version = probe.version;
+  result.clients = exportCandidates(probe.config).map(item => item.ref);
+  result.client = ref;
+  result.managed = true;
+  result.changed = true;
+  if (probe.service !== 'active' || !probe.diskMatchesRunning) {
+    return { ...result, status: 'client-added-local-handoff-failed', code: 'RUNNING_CONFIG_UNVERIFIED',
+      localHandoffCode: 'RUNNING_CONFIG_UNVERIFIED', ...(metadataFile ? { metadataFile } : {}) };
+  }
+  try {
+    const spec = clientSpec(options.nodeId, target, probe, journal.inboundIndex, journal.clientIndex, ref);
+    const wrote = writeBringBackFiles(directory, undefined, ref, spec);
+    removeClientJournal(journalPath);
+    return { ...result, status: 'client-added', outputFile: wrote.outputFile, outputFiles: wrote.outputFiles,
+      outputDirectory: wrote.outputDirectory, formats: wrote.formats, fingerprint: 'chrome',
+      ...(metadataFile ? { metadataFile } : {}) };
+  } catch (error) {
+    return { ...result, status: 'client-added-local-handoff-failed', code: 'CLIENT_LOCAL_HANDOFF_FAILED',
+      localHandoffCode: error instanceof AdoptionError ? error.code : 'LOCAL_OPERATION_FAILED',
+      ...(metadataFile ? { metadataFile } : {}) };
+  }
 }
 export function realityPublicKey(value: unknown): string {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(value)) fail('REALITY_PRIVATE_KEY_INVALID');

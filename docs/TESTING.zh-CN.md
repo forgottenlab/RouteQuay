@@ -11,7 +11,8 @@
 - 2026-11-23 复测了 FlClash 0.9.4 对官方 profile 的文件导入（两台验收节点的延迟测试成功）、Shadowrocket 的导入，以及 sing-box 1.14.4 对 Xray 26.11.9 的 REALITY 握手。结果与边界见下文同名小节，不扩大发行版范围，也不改写更早的安装验收。
 - Debian 曾出现旧公网 IP 的特定连接路径问题。通过合法更换公网 IP 并进行 SSH 主机身份验证后，完成端到端代理验证。旧 IP 的最终丢包位置及根因未被证明。
 - 新增 endpoint 更新、安全 journal 校验、并发 export 与节点锁清理逻辑完成本地测试和针对性独立复审。
-- 操作员配置里的 `ssh.configPath`（`ssh -F`）和节点 `identityFile`（`ssh -i` 与 `IdentitiesOnly=yes`）由本地参数测试覆盖。这些测试不启动 ssh，不读取私钥字节，也不连接远程主机。配置文件或密钥路径缺失、是符号链接、为空、过大，或在 POSIX 上对组/其他用户可读时，在启动 ssh 之前失败，输出只有错误码。
+- 操作员配置里的 `ssh.configPath`（`ssh -F`）和节点 `identityFile`（`ssh -i` 与 `IdentitiesOnly=yes`）由本地参数测试覆盖。这些测试不启动 ssh，不读取私钥字节，也不连接远程主机。配置文件或密钥路径缺失、是符号链接、为空、过大，或在 POSIX 上对组/其他用户可读时，在启动 ssh 之前失败，输出只有错误码。模板本身不包含这两项路径，避免 `init-config` 把示例路径传给 ssh。
+- `add-client` 在本地 mock 中覆盖：向已有入站追加一个客户端、已有客户端与 REALITY 参数保持不变、`minClientVer` 不被改写、多个客户端时 `pull` / `export` 仍要求显式 ref、`status` 返回 `inbound-N-client-N`。终端和 JSON 只检查路径，不断言 URI、UUID、私钥或 shortId。远程追加脚本在临时文件上检查拒绝轮换和失败回滚。这些测试不连接 SSH，也不在真实节点上重启 Xray。
 
 ## 已报告的本地验证结果
 
