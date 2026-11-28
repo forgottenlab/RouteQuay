@@ -12,7 +12,7 @@
 - Debian 曾出现旧公网 IP 的特定连接路径问题。通过合法更换公网 IP 并进行 SSH 主机身份验证后，完成端到端代理验证。旧 IP 的最终丢包位置及根因未被证明。
 - 新增 endpoint 更新、安全 journal 校验、并发 export 与节点锁清理逻辑完成本地测试和针对性独立复审。
 - 操作员配置里的 `ssh.configPath`（`ssh -F`）和节点 `identityFile`（`ssh -i` 与 `IdentitiesOnly=yes`）由本地参数测试覆盖。这些测试不启动 ssh，不读取私钥字节，也不连接远程主机。配置文件或密钥路径缺失、是符号链接、为空、过大，或在 POSIX 上对组/其他用户可读时，在启动 ssh 之前失败，输出只有错误码。模板本身不包含这两项路径，避免 `init-config` 把示例路径传给 ssh。
-- `add-client` 在本地 mock 中覆盖：向已有入站追加一个客户端、已有客户端与 REALITY 参数保持不变、`minClientVer` 不被改写、多个客户端时 `pull` / `export` 仍要求显式 ref、`status` 返回 `inbound-N-client-N`。终端和 JSON 只检查路径，不断言 URI、UUID、私钥或 shortId。远程追加脚本在临时文件上检查拒绝轮换和失败回滚。这些测试不连接 SSH，也不在真实节点上重启 Xray。
+- `add-client` 在本地 mock 中覆盖：向已有入站追加一个客户端、已有客户端与 REALITY 参数保持不变、`minClientVer` 不被改写、多个客户端时 `pull` / `export` 仍要求显式 ref、`status` 返回 `inbound-N-client-N`。终端和 JSON 只检查路径，不断言 URI、UUID、私钥或 shortId。远程追加脚本在临时文件上检查拒绝轮换和失败回滚。Linux 上另有一项检查不设置 `ROUTEQUAY_CLIENT_LOCAL`：在用户命名空间里把临时文件系统挂到 `/var/backups`，用目录描述符加锁，再走收据、配置写入和假的重启路径。该项里 `open()` 目录得到 `IsADirectoryError`，锁仍然成功。远端回滚失败或无法识别的结果会保留标记、退出码和异常类名；重新探测后配置仍是基线时，删除这次客户端变更日志。非 Linux 上这项目录锁检查直接返回，不记成已经执行。这些测试不连接 SSH，也不在真实节点上重启 Xray。
 - 本机分组在本地 mock 中覆盖：创建、列出、重命名、删除分组，以及添加和移除成员。成员是 `inbound-N-client-N`。分组文件缺失时列出为空；残缺文件失败且不改写。删除分组不改远程客户端。`status` 只显示分组名和 ref。`export` / `pull --group` 为每个成员分别写现行文件。终端和 JSON 只检查路径、分组名和 ref，不断言 URI、UUID、私钥或 shortId。这些测试不连接 SSH。
 - 可选本机技能由 `npm run test:skill` 检查，`npm run test:smoke` 也会调用同一检查。技能文件是 `.agents/skills/routequay/SKILL.md`。它点名的命令必须出现在 `routequay --help`。检查脚本把分享链接方案拼接起来，只用来确认禁令写在正文里、示例块里没有它，并且没有带载荷的链接。脚本不写入 UUID 或私钥，只断言技能里没有这两种材料。操作员配置模板仍然没有 `ssh.configPath`、`knownHostsPath` 和 `identityFile`。运行包清单不包含该技能。这项检查不连接 SSH。
 

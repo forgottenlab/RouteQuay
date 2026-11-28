@@ -33,10 +33,15 @@ export type Probe = {
   install?: import('./xray-install.ts').InstallInspection;
 };
 export type ClientApplyStatus = 'ROUTEQUAY_CLIENT_APPLIED' | 'ROUTEQUAY_CLIENT_RESTORED' | 'ROUTEQUAY_CLIENT_REFUSED' | 'ROUTEQUAY_CLIENT_ROLLBACK_FAILED';
+export type ClientApplyResult = {
+  status: ClientApplyStatus | 'UNRECOGNIZED';
+  remoteExit?: number | null;
+  errorType?: string;
+};
 export interface AdoptionTransport {
   resolve(alias: string): SshTarget;
   probe(target: SshTarget): Probe;
-  applyClient?(target: SshTarget, payload: ClientChangePayload): { status: ClientApplyStatus };
+  applyClient?(target: SshTarget, payload: ClientChangePayload): ClientApplyResult;
 }
 function fail(code: string, exitCode = 2): never { throw new AdoptionError(code, exitCode); }
 export function parseSshConfig(alias: string, output: string): SshTarget {
@@ -76,6 +81,25 @@ export function prepareSshResolve(alias: string, files: SshClientFiles = {}): st
   assertSshClientFiles(files);
   return args;
 }
+const remoteErrorPattern = /^ROUTEQUAY_CLIENT_ERROR ([A-Za-z_][A-Za-z0-9_]{0,63})$/;
+function remoteErrorType(stderr: string): string | undefined {
+  for (const line of stderr.split(/\r?\n/)) {
+    const match = remoteErrorPattern.exec(line.trim());
+    if (match?.[1]) return match[1];
+  }
+  return undefined;
+}
+// Stdout must be exactly one known marker. Only the exception class is kept from stderr.
+export function readClientApplyResult(output: { stdout?: string | null; stderr?: string | null; status?: number | null }): ClientApplyResult {
+  const marker = (output.stdout ?? '').trim();
+  const allowed: ClientApplyStatus[] = ['ROUTEQUAY_CLIENT_APPLIED', 'ROUTEQUAY_CLIENT_RESTORED', 'ROUTEQUAY_CLIENT_REFUSED', 'ROUTEQUAY_CLIENT_ROLLBACK_FAILED'];
+  const errorType = remoteErrorType(output.stderr ?? '');
+  return {
+    status: allowed.includes(marker as ClientApplyStatus) ? marker as ClientApplyStatus : 'UNRECOGNIZED',
+    remoteExit: output.status ?? null,
+    ...(errorType ? { errorType } : {})
+  };
+}
 export function createOpenSshTransport(files: SshClientFiles = {}): AdoptionTransport {
   return {
     resolve(alias) {
@@ -102,9 +126,8 @@ export function createOpenSshTransport(files: SshClientFiles = {}): AdoptionTran
       const result = spawnSync('ssh', [...prepareSshConnect(target, files),
         'if [ "$(id -u)" = 0 ]; then bash -s; else sudo -n env SSH_CONNECTION="$SSH_CONNECTION" bash -s; fi'],
         { input: script, encoding: 'utf8', windowsHide: true, timeout: 120000, maxBuffer: 64 * 1024 });
-      const marker = (result.stdout ?? '').trim();
-      const allowed: ClientApplyStatus[] = ['ROUTEQUAY_CLIENT_APPLIED', 'ROUTEQUAY_CLIENT_RESTORED', 'ROUTEQUAY_CLIENT_REFUSED', 'ROUTEQUAY_CLIENT_ROLLBACK_FAILED'];
-      return { status: allowed.includes(marker as ClientApplyStatus) ? marker as ClientApplyStatus : 'ROUTEQUAY_CLIENT_ROLLBACK_FAILED' };
+      if (!(result.stdout ?? '').trim() && /Permission denied/i.test(result.stderr ?? '')) fail('SSH_AUTH_FAILED', 4);
+      return readClientApplyResult(result);
     }
   };
 }
@@ -727,7 +750,24 @@ function completeAddClient(input: AddClientContext): AdoptionResult {
     fail(applied.status === 'ROUTEQUAY_CLIENT_REFUSED' ? 'CLIENT_CHANGE_REFUSED' : 'CLIENT_CHANGE_RESTORED',
       applied.status === 'ROUTEQUAY_CLIENT_REFUSED' ? 3 : 4);
   }
-  fail('CLIENT_CHANGE_UNKNOWN', 4);
+  if (applied.status === 'ROUTEQUAY_CLIENT_ROLLBACK_FAILED') {
+    if (freshCanonical === currentCanonical) removeClientJournal(journalPath);
+    failClientApply('CLIENT_CHANGE_ROLLBACK_FAILED', applied);
+  }
+  failClientApply('CLIENT_CHANGE_UNKNOWN', applied);
+}
+function failClientApply(code: string, applied: ClientApplyResult): never {
+  const error = new AdoptionError(code, 4);
+  const parts = [`remote ${applied.status}`];
+  if (applied.errorType) parts.push(applied.errorType);
+  if (typeof applied.remoteExit === 'number') parts.push(`exit ${applied.remoteExit}`);
+  error.details = {
+    stage: 'apply-client',
+    ...(applied.remoteExit !== undefined ? { processExit: applied.remoteExit } : {}),
+    ...(applied.errorType ? { errorType: applied.errorType } : {}),
+    reason: parts.join(' · ')
+  };
+  throw error;
 }
 function finishLandedClient(input: AddClientContext, journal: ClientJournal, probe: Probe, metadataPath: string,
   journalPath: string, ownerLabel?: string, remark?: string): AdoptionResult {

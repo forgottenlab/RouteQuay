@@ -172,6 +172,26 @@ def safe_path(value):
     return isinstance(value, str) and value.startswith('/') and 1 <= len(value) <= 240 and '\n' not in value and '\0' not in value
 
 
+def acquire_directory_lock(directory):
+    # open() raises IsADirectoryError for a directory. A directory fd can be locked.
+    import fcntl
+    if not safe_path(directory) or os.path.islink(directory):
+        raise ApplyError('REFUSED')
+    flags = os.O_RDONLY | os.O_DIRECTORY
+    if hasattr(os, 'O_CLOEXEC'):
+        flags |= os.O_CLOEXEC
+    try:
+        descriptor = os.open(directory, flags)
+    except OSError:
+        raise ApplyError('REFUSED')
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(descriptor)
+        raise ApplyError('REFUSED')
+    return descriptor
+
+
 def apply_payload(payload):
     if not isinstance(payload, dict):
         raise ApplyError('REFUSED')
@@ -195,13 +215,10 @@ def apply_payload(payload):
         if not safe_path(receipt) or os.path.islink(receipt):
             raise ApplyError('REFUSED')
     else:
-        import fcntl
         path = discover_config_path(expected)
         receipt = '/var/backups/routequay-client-' + job_id
-        lock = open('/var/backups', 'r')
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
+        lock = acquire_directory_lock('/var/backups')
+        if lock < 0:
             raise ApplyError('REFUSED')
     try:
         current = load_json(path)
@@ -269,8 +286,11 @@ def main():
     except ApplyError as error:
         sys.stdout.write(marker_for(error.code) + '\n')
         return 1
-    except Exception:
+    except Exception as error:
         sys.stdout.write(marker_for('ROLLBACK_FAILED') + '\n')
+        name = type(error).__name__
+        if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,63}', name):
+            sys.stderr.write('ROUTEQUAY_CLIENT_ERROR %s\n' % name)
         return 1
 
 
