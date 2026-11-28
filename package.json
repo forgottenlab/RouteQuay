@@ -23,7 +23,7 @@
     "test:adoption": "node --test apps/cli/test/adoption.test.ts",
     "test:install": "node --test apps/cli/test/install.test.ts",
     "test:ssh": "node --test packages/core/test/ssh-trust.test.ts",
-    "test:cli": "node --test apps/cli/test/adoption.test.ts apps/cli/test/install.test.ts apps/cli/test/operator-config.test.ts apps/cli/test/add-client.test.ts apps/cli/test/client-groups.test.ts",
+    "test:cli": "node --test apps/cli/test/adoption.test.ts apps/cli/test/install.test.ts apps/cli/test/operator-config.test.ts apps/cli/test/add-client.test.ts apps/cli/test/client-groups.test.ts apps/cli/test/harden.test.ts",
     "test:smoke": "node scripts/cli-smoke.mjs",
     "test:skill": "node scripts/skill-check.mjs",
     "test:installer": "node --test scripts/windows-install.test.mjs",

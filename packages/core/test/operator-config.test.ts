@@ -24,6 +24,7 @@ test('the committed operator template is placeholder data with no password field
   const config = validateOperatorConfig(JSON.parse(raw));
   assert.equal(config.schemaVersion, 'routequay-operator-config-v1');
   assert.equal(config.dataDir, '~/.routequay');
+  assert.deepEqual(config.allowCidrs, []);
   assert.equal(config.ssh, undefined);
   assert.equal(config.nodes[0]?.id, 'example-node');
   assert.equal(config.nodes[0]?.sshAlias, 'example-node');
@@ -45,6 +46,12 @@ test('validation accepts an alias-only node and rejects secrets, unknown keys, a
   });
   assert.equal(aliasOnly.nodes[0]?.sshAlias, undefined);
   assert.equal(aliasOnly.nodes[0]?.authMethod, 'agent');
+  const withCidr = template();
+  withCidr.allowCidrs = ['203.0.113.10/24', '203.0.113.0/24'];
+  (withCidr.nodes as Array<Record<string, unknown>>)[0].allowCidrs = ['198.51.100.20/32'];
+  const accepted = validateOperatorConfig(withCidr);
+  assert.deepEqual(accepted.allowCidrs, ['203.0.113.0/24']);
+  assert.deepEqual(accepted.nodes[0]?.allowCidrs, ['198.51.100.20/32']);
   const withKey = template();
   (withKey.nodes as Array<Record<string, unknown>>)[0].authMethod = 'ssh-key';
   assert.equal(validateOperatorConfig(withKey).nodes[0]?.authMethod, 'ssh-key');
@@ -56,6 +63,10 @@ test('validation accepts an alias-only node and rejects secrets, unknown keys, a
     { ...template(), nodes: [{ ...(template().nodes as object[])[0], host: `${importScheme}vpn.example.invalid` }] },
     { ...template(), nodes: [{ ...(template().nodes as object[])[0], identityFile: 'A'.repeat(80) }] },
     { ...template(), extra: true },
+    { ...template(), allowCidrs: ['0.0.0.0/0'] },
+    { ...template(), allowCidrs: ['::/0'] },
+    { ...template(), allowCidrs: ['203.0.113.10'] },
+    { ...template(), nodes: [{ ...(template().nodes as object[])[0], allowCidrs: ['192.0.2.1/33'] }] },
     { ...template(), nodes: [{ ...(template().nodes as object[])[0], port: 0 }] },
     { ...template(), nodes: [{ ...(template().nodes as object[])[0], id: 'example-node' }, { id: 'example-node' }] }
   ];

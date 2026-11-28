@@ -239,7 +239,7 @@ export async function runSetup(options: SetupOptions, root = '.', transport: Ins
       localReadiness: 'ready', externalTcp, proxyHttps: 'not-verified', unverified: ['proxy-https', 'cloud-firewall'],
       networkStatus: externalTcp === 'reachable' ? 'tcp-reachable-proxy-unverified' : 'local-ready-external-unreachable',
       diagnostics: externalTcp === 'reachable' ? [] : [{ code: 'CHECK_FIREWALL_AND_CLOUD_RULES',
-        message: `核对主机 nftables 与云安全组的 TCP ${plan.port} 入站规则；本次未修改规则。` }],
+        message: `核对主机 nftables 与云安全组的 TCP ${plan.port} 入站规则；本次未修改规则。需要时另执行 routequay harden --plan。` }],
       recoveryReceipt: `/var/backups/vpn-control-plane-${id}`, commandAcknowledged: result.status === 0 };
   } finally { unlinkSync(lock); }
 }

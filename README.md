@@ -32,6 +32,7 @@ Several mature networking and Xray management projects already exist. RouteQuay 
 | Bring client files back to this machine (`pull`) | A successful first install, and an adoption that changes local state, writes into the active data root. `pull` can be run again later. The five current files are a VLESS URI, a QR PNG, a Mihomo provider, a Mihomo profile, and sing-box JSON. The terminal prints paths only. A marked install and an unmarked checkout use different data roots, with no automatic migration. There is no subscription URL |
 | Explicitly update a server endpoint while preserving SSH host identity | Implemented and tested |
 | SSH identity checks, transaction recovery, local state protection | Implemented; see limitations |
+| Host hardening (`harden`) | Explicit `--plan` / `--apply`. Source-restricted host firewall (nftables, or already-active ufw/firewalld), SSH key-only, and an Xray systemd sandbox. Operator CIDRs are add-only. Cloud security groups are unchanged. `setup` does not call this command. Local tests only |
 | Web management UI and broader network management | Experimental; **not part of the first stable scope** |
 
 **Tested deployment targets:** Ubuntu 24.04 LTS and Debian 13, with Xray v26.11.9 used in the recorded real-machine tests. This is **not** a claim of support for every Linux distribution, hosting provider, transport, or client.
@@ -44,7 +45,7 @@ Path A is the `routequay` command. Setup, status, export, pull, add-client, and 
 
 Path B is an optional local skill at `.agents/skills/routequay/SKILL.md`. The CLI never reads it. A local assistant sees it only when the operator opens this repository in an assistant that loads `.agents/skills/`, or copies that directory into the user skill directory on this machine. Until it is loaded, Path A is unchanged. The assistant may run only existing `routequay` commands, and it reports paths, node ids, `inbound-N-client-N` refs, group names, and status or error codes. Do not install, copy, or run this skill on the Xray host.
 
-Host firewall changes, security groups, and a GitHub Release stay later. This skill does not perform them.
+Host firewall changes are the explicit `routequay harden` command. The skill may run that command and does not invent another path. It does not create, change, or delete cloud security groups. A GitHub Release stays later. Do not install this skill on the Xray host.
 
 ## 📦 Installation and prerequisites
 
@@ -78,6 +79,7 @@ Run commands from the project checkout using PowerShell, or from any new termina
 ```powershell
 # Inspect the intended setup operation without making changes.
 .\routequay.cmd setup example-node --plan
+.\routequay.cmd harden example-node --plan
 
 # Inspect an already configured node.
 .\routequay.cmd status example-node
@@ -161,6 +163,18 @@ The schema is the official outbound VLESS and TLS documents ([VLESS](https://sin
 
 No inbound is written, so the file does not open a local proxy port. TUN and DNS are omitted, and `insecure` is not set. `minClientVer` on the server is unchanged. On 2026-11-23 the official sing-box 1.14.4 binary accepted three synthetic files with `sing-box check -c`: vision flow with a short ID, an empty short ID and no flow, and an IPv6 server. The same binary rejected a copied `support-x25519mlkem768` field as an unknown field, and rejected a REALITY outbound after `utls` was removed. That synthetic check loads JSON only and does not open a connection. The acceptance retest the same day used the official exported JSON: `sing-box check -c` passed, and the REALITY handshake to Xray 26.11.9 failed with `reality verification failed`. Official 1.14.4 strips `X25519MLKEM768` from the REALITY ClientHello. On the same path, Mihomo 1.19.33 with the official field `reality-opts.support-x25519mlkem768: true` succeeded. Do not treat weakening server REALITY, changing `minClientVer`, or adding unofficial JSON fields as a workaround. The selector can be changed through the Clash API; with one outbound, `default` already selects it.
 
+## Host hardening
+
+`routequay harden <node> --plan` reads an adopted node and prints the pack. It does not change the host. The pack is a source-restricted host firewall, SSH key-only, and an Xray systemd sandbox.
+
+nftables is preferred. ufw or firewalld is used only when that firewall is already active. The command does not install packages. It does not enable unattended-upgrades, logrotate, Lynis, vnStat, sysstat, mtr, iperf3, or Fail2ban. Fail2ban stays off when SSH is source-restricted. CrowdSec, AppArmor, AIDE, auditd, Netdata, Prometheus, and Grafana are not part of the pack.
+
+Repeatable `--cidr` and `allowCidrs` in the local config are the only sources of new networks. A later WAN address is added. Existing allow rules are not deleted. The SSH port is the current SSH connection. Xray ports come from the adopted inbound configuration. `203.0.113.0/24`, `198.51.100.0/24`, `192.0.2.0/24`, and `2001:db8::/32` are documentation ranges.
+
+A non-interactive or `--json` run changes the host only with `--apply`. `--plan` and `--apply` cannot be combined. If the current SSH source is not covered, apply stops before the default policy changes. Cloud security groups are not created, replaced, or deleted. `setup --apply` still does not change the firewall. `CHECK_FIREWALL_AND_CLOUD_RULES` remains a reminder.
+
+An installed copy stores operator config under `%USERPROFILE%\.routequay\`. A checkout stores node state under `local/private`.
+
 ## 🧪 Testing
 
 Local checks in this independent snapshot:
@@ -178,7 +192,8 @@ See [Testing notes](docs/TESTING.zh-CN.md) for the evidence boundary and validat
 ## 🔐 Safety and limitations
 
 - **Never commit** private SSH keys, credentials, real VLESS URIs, local node state, installation journals containing sensitive information, or generated exports.
-- Review a `setup --plan` result before applying changes. Do not assume the tool configures cloud firewalls or replaces existing services automatically.
+- Review a `setup --plan` result before applying changes. `setup` does not change the host firewall or SSH configuration. Do not assume the tool configures cloud security groups or replaces existing services automatically.
+- `routequay harden` is a separate command. `--plan` is read-only. Apply only with `--apply` after the operator supplies a CIDR via `--cidr` or `allowCidrs`. New CIDRs are added; existing allow rules are not deleted. The documentation range `203.0.113.0/24` is not an operator network.
 - Keep SSH strict host-key verification enabled; address changes and identity changes are different events.
 - Do not mix older writers that ignore the newer node-lock coordination protocol. A leftover guard/lock requires manual investigation after confirming operations are idle.
 - Do not treat the current CLI as a general-purpose LAN/WAN overlay networking solution or a production-ready multi-user web panel.

@@ -7,6 +7,8 @@ import { InstallLayoutError, resolveStateRoot } from '../../../packages/core/src
 import { applyOperatorSshAlias, initOperatorConfig, operatorConfigPath, operatorSshFiles, readOperatorConfig } from '../../../packages/core/src/operator-config.ts';
 import { isExportFormat } from '../../../packages/exporters/src/client-connection.ts';
 import { createInstallTransport, runSetup, type SetupOptions } from '../../../packages/core/src/xray-install.ts';
+import { canonicalCidr, mergeCidrs, runHarden, type HardenCommand } from '../../../packages/core/src/host-harden.ts';
+import { operatorAllowCidrs } from '../../../packages/core/src/operator-config.ts';
 import { createInterface } from 'node:readline/promises';
 
 export const help = `routequay — 通过 OpenSSH 接管现有 Xray
@@ -14,6 +16,7 @@ export const help = `routequay — 通过 OpenSSH 接管现有 Xray
 正式命令是 routequay。vpncp 调用同一程序，保留为兼容入口。
 
   routequay setup <node> [--ssh <Host>] [--plan | --apply] [--port 8443] [--json]
+  routequay harden <node> [--ssh <Host>] [--cidr <网段>] [--plan | --apply] [--json]
   routequay status <node> [--ssh <Host>] [--json]
   routequay endpoint <node> --host <new-host> [--json]
   routequay export <node> --to v2rayn|vless-qr|mihomo-provider|mihomo-profile|sing-box [--client <ref> | --group <name>] [--out <path>] [--json]
@@ -67,7 +70,13 @@ mihomo YAML 的 reality-opts 写入 support-x25519mlkem768；已在 Mihomo 1.19.
 sing-box 的 reality 只写官方字段 enabled、public_key、short_id，并启用 utls 指纹 chrome。network 为 tcp。packet_encoding 写空字符串，因为 sing-box 1.14.4 省略该字段时会启用 xudp。
 sing-box 没有与 support-x25519mlkem768 对应的官方字段，也不写 curve_preferences。官方稳定版 1.14.4 在 REALITY 客户端代码里去掉 X25519MLKEM768；这不是配置项。未做 sing-box 握手验证。
 默认 chrome 指纹。服务器 network 为 raw 时仍导出 tcp。Mihomo 不写 udp 与 packet-encoding。
-防火墙与 SSH 配置不会自动调整。
+setup、status、endpoint、pull 与 add-client 不修改防火墙或 SSH 配置。
+harden 是单独的主机加固命令。--plan 只读。非交互或 --json 必须带 --apply 才会改主机。不能同时使用 --plan 和 --apply。
+默认只做三件事：按来源限制的主机防火墙（优先 nftables；仅当 ufw 或 firewalld 已经是活动防火墙时才改用它）、SSH 仅密钥，以及 Xray 的 systemd 沙箱。
+不安装、不启用 unattended-upgrades、logrotate、Lynis、vnStat、sysstat、mtr、iperf3 或 Fail2ban。SSH 已按来源限制时不启用 Fail2ban。
+不配置 CrowdSec、AppArmor、AIDE、auditd、Netdata、Prometheus 或 Grafana，也不创建、覆盖或删除云安全组规则。
+--cidr 可重复，也可写在本机配置的 allowCidrs。网段必须由操作员给出。只追加放行，不删除已有放行。
+当前 SSH 来源不在已有放行或本次网段内时拒绝执行。Xray 端口来自已接管配置里的托管入站，不另写端口清单。
 这些文件默认写在私有数据目录下的 local/private/cli-nodes/<node>/。
 pull 的 --out 必须是已经存在的目录，命令会把它收紧为仅当前用户可访问。
 --data-dir <path> 只覆盖这一次命令的私有数据目录。开发目录默认仍使用仓库内的 local/private。
@@ -141,6 +150,54 @@ export function parseArguments(args: string[]): SetupOptions {
   if (options.plan && options.apply) throw new AdoptionError('CONFLICTING_OPTIONS');
   if (options.client && options.group) throw new AdoptionError('CONFLICTING_OPTIONS');
   return options;
+}
+export function parseHardenArguments(args: string[]): HardenCommand {
+  const [command, nodeId, ...flags] = args;
+  if (command !== 'harden' || !nodeId || nodeId.startsWith('-')) throw new AdoptionError('USAGE');
+  const options: HardenCommand = { command: 'harden', nodeId, cidrs: [] };
+  const seen = new Set<string>();
+  for (let i = 0; i < flags.length; i++) {
+    const flag = flags[i];
+    if (flag !== '--cidr' && seen.has(flag)) throw new AdoptionError('DUPLICATE_OPTION');
+    if (flag !== '--cidr') seen.add(flag);
+    if (flag === '--json') options.json = true;
+    else if (flag === '--plan') options.plan = true;
+    else if (flag === '--apply') options.apply = true;
+    else if (flag === '--data-dir' || flag === '--ssh' || flag === '--cidr') {
+      const value = flags[++i];
+      if (!value || value.startsWith('-')) throw new AdoptionError('OPTION_VALUE_REQUIRED');
+      if (flag === '--data-dir') options.dataDir = value;
+      if (flag === '--ssh') options.ssh = value;
+      if (flag === '--cidr') {
+        try { options.cidrs.push(canonicalCidr(value)); }
+        catch (error) {
+          if (error instanceof AdoptionError && error.code === 'HARDEN_CIDR_UNRESTRICTED') throw error;
+          throw new AdoptionError('OPTION_VALUE_INVALID');
+        }
+      }
+    } else throw new AdoptionError('UNKNOWN_OPTION');
+  }
+  if (options.plan && options.apply) throw new AdoptionError('CONFLICTING_OPTIONS');
+  if (options.cidrs.length > 16) throw new AdoptionError('OPTION_VALUE_INVALID');
+  options.cidrs = mergeCidrs([], options.cidrs);
+  return options;
+}
+export function renderHardenResult(result: AdoptionResult): string {
+  const cidrs = Array.isArray(result.cidrs) ? result.cidrs.filter((item): item is string => typeof item === 'string') : [];
+  const ports = Array.isArray(result.xrayPorts) ? result.xrayPorts.filter((item): item is number => Number.isInteger(item)) : [];
+  const blockers = Array.isArray(result.blockers) ? result.blockers.filter((item): item is string => typeof item === 'string') : [];
+  const lines = [
+    `${result.nodeId} · ${result.status}`,
+    `防火墙 ${result.backend ?? '未知'} · 策略 ${result.policy ?? '未知'}`,
+    `SSH 端口 ${result.sshPort ?? '未知'} · 仅密钥 ${result.sshKeyOnly ?? '未知'}`,
+    `Xray 端口 ${ports.join(', ') || '未知'} · 沙箱 ${result.sandbox ?? '未知'}`,
+    `放行网段 ${cidrs.join(', ') || '未给出'}`,
+    `当前会话已被覆盖 ${result.sshSourceCovered === true ? '是' : '否'} · 来源已收紧 ${result.sshSourceRestricted === true ? '是' : '否'}`,
+    '云安全组 不修改 · Fail2ban 不启用'
+  ];
+  if (blockers.length) lines.push(`未执行 ${blockers.join(', ')}`);
+  if (result.code) lines.push(`原因 ${result.code}`);
+  return lines.join('\n');
 }
 const groupActions = ['list', 'create', 'rename', 'remove', 'add-member', 'remove-member'] as const;
 export function parseGroupArguments(args: string[]): ClientGroupCommand & { dataDir?: string } {
@@ -246,6 +303,24 @@ export async function main(args = process.argv.slice(2), env: NodeJS.ProcessEnv 
       const result = runClientGroups(groupCommand, root);
       console.log(args.includes('--json') ? JSON.stringify(result) : renderGroupResult(result));
       return result.code ? (['completed-cleanup-failed', 'cleanup-failed'].includes(String(result.status)) ? 4 : 2) : 0;
+    }
+    if (args[0] === 'harden') {
+      const hardenCommand = parseHardenArguments(args);
+      const config = readOperatorConfig(operatorConfigPath(env));
+      const command = applyOperatorSshAlias(hardenCommand, config);
+      command.cidrs = mergeCidrs(operatorAllowCidrs(config, command.nodeId), hardenCommand.cidrs);
+      const root = resolveStateRoot(programRoot, { dataDir: command.dataDir, configuredDataDir: config?.dataDir, env });
+      const confirm = process.stdin.isTTY && !command.json && !command.plan && !command.apply ? async (plan: AdoptionResult) => {
+        console.log(renderHardenResult(plan));
+        console.log('将只追加防火墙放行，不删除已有放行，也不修改云安全组。');
+        console.log('SSH 仅在当前会话已是公钥登录时改为仅密钥。Xray 沙箱若未能恢复会回滚。');
+        const prompt = createInterface({ input: process.stdin, output: process.stdout });
+        try { return /^y(?:es)?$/i.test((await prompt.question('执行此加固计划？[y/N] ')).trim()); }
+        finally { prompt.close(); }
+      } : undefined;
+      const result = await runHarden(command, root, undefined, confirm);
+      console.log(command.json ? JSON.stringify(result) : renderHardenResult(result));
+      return result.code ? (result.status === 'unsupported' ? 2 : 4) : 0;
     }
     if (args[0] === 'init-config' || args[0] === 'init') {
       if (args.slice(1).some(arg => arg !== '--json')) throw new AdoptionError('UNKNOWN_OPTION');

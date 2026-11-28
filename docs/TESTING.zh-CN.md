@@ -113,6 +113,20 @@ Linux、Node.js v22.23.4 上执行 `npm ci --ignore-scripts --no-audit --no-fund
 
 **sing-box 1.14.4。** 官方导出的 JSON 通过 `sing-box check -c`。对 Xray 26.11.9 的 REALITY 握手失败，错误为 `reality verification failed`。这是已知的上游限制：官方 sing-box 1.14.4 会从 REALITY ClientHello 中去掉 `X25519MLKEM768`。同一路径上，Mihomo 1.19.33 使用官方字段 `reality-opts.support-x25519mlkem768: true` 时成功。不要为此削弱服务器 REALITY，不要修改 `minClientVer`，也不要向 sing-box JSON 添加非官方字段。
 
+## 主机加固
+
+`routequay harden <node>` 在本地 mock 和 `python3` 夹具里覆盖，不连接真实 SSH，也不在验收用的 Ubuntu / Debian VPS 上执行。`--plan` 只调用只读检查。非交互且没有 `--apply` 时返回 `HARDEN_APPROVAL_REQUIRED`，测试不会把确认词管道进提示。`--plan` 与 `--apply` 同时出现时返回 `CONFLICTING_OPTIONS`。
+
+夹具里的网段只用文档保留范围：`203.0.113.0/24`、`198.51.100.0/24`、`192.0.2.0/24`，以及 `2001:db8::/32`。`0.0.0.0/0` 和 `::/0` 被拒绝。当前 SSH 来源不在已有放行或本次网段内时，应用在改默认策略之前停止，夹具里的规则保持原样。已有放行在追加新网段后仍然存在，动作里没有删除或清空。ufw 或 firewalld 只有在夹具标明它已经活动时才被选用；两者同时活动时拒绝。nftables 不可用且没有活动防火墙时停止，不安装软件包。
+
+Xray 端口来自夹具配置里的托管入站。回环地址上的入站不计入。测试使用 `9443`，用来确认命令不会另写一份固定端口清单。云安全组字段保持 `unchanged`，脚本里没有云 API 调用。SSH 若不能确认公钥登录，不会重载 ssh。沙箱未能让 xray 保持活动时，只回滚这次写入的 drop-in，不删除已经追加的放行。终端和 JSON 不断言 UUID、私钥或 `vless://`。`setup` 的安装脚本不调用 `harden`，外部不通时的 `CHECK_FIREWALL_AND_CLOUD_RULES` 仍写明本次未修改规则。
+
+这些检查使用仓库测试里的 `python3` 命令名。它们不覆盖真实 nftables、ufw、firewalld 或 systemd 的语法差异，也不代表已经在 VPS 上执行过这套默认。
+
+### 2026-11-28 主机加固本地检查
+
+Linux、Node.js v22.23.4 上执行 `npm ci --ignore-scripts --no-audit --no-fund` 和 `npm run check`：类型检查通过；单元 29、安全 5、SSH 信任 3、CLI 72、安装器 16 全部通过，0 失败。smoke、技能检查和候选文件扫描（75 个文件）通过。没有连接 SSH，没有在验收 VPS 上执行 `harden --apply`。
+
 ## 不能从当前结果推断的事项
 
 - 不代表对所有 Linux 版本或云服务商提供兼容保证。

@@ -1,6 +1,7 @@
 {
   "schemaVersion": "routequay-operator-config-v1",
   "dataDir": "~/.routequay",
+  "allowCidrs": [],
   "nodes": [
     {
       "id": "example-node",
