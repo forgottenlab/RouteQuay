@@ -32,6 +32,7 @@ RouteQuay 是轻量、快捷、安全的网络接入与服务器管理工具，�
 | 把客户端文件带回本机（`pull`） | 成功的首次安装，以及本地状态有变化的接管，会自动写到当前数据根；之后也可以再执行 `pull`。五种现行文件是 VLESS URI、二维码 PNG、Mihomo provider、Mihomo profile 和 sing-box JSON。终端只打印路径。带安装标记的安装与未标记的检出使用不同数据根，不会自动迁移。不提供订阅 URL |
 | 显式更新公网地址并保留 SSH 主机身份 | 已实现并测试 |
 | SSH 身份保护、事务恢复和本地状态保护 | 已实现，存在明确使用边界 |
+| 主机加固（`harden`） | 显式 `--plan` / `--apply`。来源限制的主机防火墙（nftables；仅当 ufw 或 firewalld 已是活动防火墙时改用它）、SSH 仅密钥，以及 Xray systemd 沙箱。操作员网段只追加。云安全组不修改。`setup` 不调用这条命令。仅有本地测试 |
 | Web 可视化管理及更广泛的网络功能 | 实验阶段，**不属于首发稳定范围** |
 
 **已测试系统：** Ubuntu 24.04 LTS、Debian 13。已归档的实机验证使用 Xray v26.11.9。上述事实**不代表**支持所有 Linux 发行版、云平台、协议或客户端。
@@ -44,7 +45,7 @@ Path A 是 `routequay` 命令。安装、状态、导出、`pull`、`add-client`
 
 Path B 是仓库里的可选技能，文件是 `.agents/skills/routequay/SKILL.md`。CLI 不读取它。操作员在本机使用会加载 `.agents/skills/` 的助手打开本仓库，或把该目录复制到本机的用户技能目录时，助手才会看到它。未加载时，Path A 照常使用。助手只能运行已经存在的 `routequay` 命令，并且只汇报路径、节点 id、`inbound-N-client-N`、分组名和状态或错误码。不要把这个技能安装、复制或运行到 Xray 主机上。
 
-主机防火墙、安全组和 GitHub Release 仍留在后面。这条技能不执行它们。
+主机防火墙是显式的 `routequay harden` 命令。技能只运行这条命令，不另造路径，也不创建、修改或删除云安全组。GitHub Release 仍留在后面。不要把这个技能安装到 Xray 主机上。
 
 ## 📦 安装与环境要求
 
@@ -78,6 +79,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Actio
 ```powershell
 # 只读查看准备执行的部署操作。
 .\routequay.cmd setup example-node --plan
+.\routequay.cmd harden example-node --plan
 
 # 查看已配置节点的状态。
 .\routequay.cmd status example-node
@@ -161,6 +163,18 @@ Mihomo 的 TLS/REALITY 文档写明不考虑与 xray-core v26.7.11 及更新版�
 
 文件不写入站，所以不会打开本地代理端口。不写 TUN 和 DNS，也不写 `insecure`。服务器上的 `minClientVer` 保持原样。2026-11-23 用官方 sing-box 1.14.4 对三份合成文件执行 `sing-box check -c`：带 vision flow 和 short ID、空 short ID 且没有 flow、以及 IPv6 服务器，均被接受。同一二进制把抄进去的 `support-x25519mlkem768` 判为未知字段，并在去掉 `utls` 后拒绝该 REALITY 出站。这次合成文件检查只加载 JSON，不建立连接。同一天的验收复测使用官方导出 JSON：`sing-box check -c` 通过，但对 Xray 26.11.9 的 REALITY 握手失败，错误为 `reality verification failed`。原因是官方 1.14.4 从 REALITY ClientHello 去掉 `X25519MLKEM768`。同一路径上，Mihomo 1.19.33 使用官方字段 `reality-opts.support-x25519mlkem768: true` 时成功。不要把削弱服务器 REALITY、修改 `minClientVer` 或向 JSON 添加非官方字段当作解决办法。selector 目前只能通过 Clash API 切换；只有一个出站时，`default` 已经选中它。
 
+## 主机加固
+
+`routequay harden <node> --plan` 读取已接管节点并打印加固计划，不改主机。这套默认只包含三件事：按来源限制的主机防火墙、SSH 仅密钥，以及 Xray 的 systemd 沙箱。
+
+优先使用 nftables。只有 ufw 或 firewalld 已经是活动防火墙时才改用它。这条命令不安装软件包，也不启用 unattended-upgrades、logrotate、Lynis、vnStat、sysstat、mtr、iperf3 或 Fail2ban。SSH 已按来源限制时不启用 Fail2ban。CrowdSec、AppArmor、AIDE、auditd、Netdata、Prometheus 和 Grafana 不属于这套默认。
+
+新的网段只来自可重复的 `--cidr`，或本机配置里的 `allowCidrs`。广域网地址变化时只追加。已有放行不删除。SSH 端口是当前这条 SSH 连接的端口。Xray 端口来自已接管配置里的托管入站。`203.0.113.0/24`、`198.51.100.0/24`、`192.0.2.0/24` 和 `2001:db8::/32` 是文档保留范围。
+
+非交互或带 `--json` 时，只有 `--apply` 才会改主机。`--plan` 和 `--apply` 不能同时使用。当前 SSH 来源没有被已有放行或本次网段覆盖时，命令会在改默认策略之前停止。云安全组不创建、不替换、不删除。`setup --apply` 仍然不改防火墙。`CHECK_FIREWALL_AND_CLOUD_RULES` 仍只是提醒。
+
+已安装副本的操作员配置在 `%USERPROFILE%\.routequay\`。检出目录的节点状态在 `local/private`。
+
 ## 🧪 测试
 
 本独立候选目录提供的测试命令包括：
@@ -178,7 +192,8 @@ npm run test:safety
 ## 🔐 安全提醒与限制
 
 - **严禁提交** SSH 私钥、令牌、真实 VLESS 链接、本地私有节点状态、可能包含敏感字段的安装 journal 和导出产物。
-- 执行变更前先检查 `setup --plan`，不要假定工具会自动设置云防火墙或随意替换已有服务。
+- 执行变更前先检查 `setup --plan`。`setup` 不修改主机防火墙或 SSH 配置。不要假定工具会自动设置云安全组或随意替换已有服务。
+- `routequay harden` 是单独的命令。`--plan` 只读。只有操作员通过 `--cidr` 或 `allowCidrs` 给出网段，并用 `--apply` 确认后才会改主机。新网段只追加，不删除已有放行。文档网段 `203.0.113.0/24` 不是操作员的网络。
 - 必须保留严格 SSH 主机密钥校验；连接地址变化与服务器身份变化不是一回事。
 - 不支持旧版写者与新版节点锁协议混用。遗留 guard/锁需要先确认相关操作全部静默，再人工核查恢复。
 - 当前 CLI **并非**通用内外网虚拟组网方案，也不是已达到生产成熟度的多用户 Web 面板。

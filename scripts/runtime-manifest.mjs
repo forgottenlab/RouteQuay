@@ -18,6 +18,8 @@ export const runtimeFiles = [
   'packages/core/src/protect-private-path.ps1',
   'packages/core/src/install-preflight.py',
   'packages/core/src/xray-adoption-probe.py',
+  'packages/core/src/host-harden.ts',
+  'packages/core/src/host-harden.py',
   'packages/core/src/first-install-transaction.sh',
   'packages/core/src/xray-install.sh',
   'packages/exporters/src/client-connection.ts',

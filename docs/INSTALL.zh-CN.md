@@ -40,7 +40,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Yes -
 
 `routequay init-config` 在文件不存在时，把 `examples/operator-config.example.json` 复制到 `%USERPROFILE%\.routequay\config.json`，并且只打印路径。`init` 是同一命令。已有文件不会被覆盖：命令以退出码 2 结束，标准输出仍然只有该路径。加上 `--json` 时，失败对象的 `code` 是 `OPERATOR_CONFIG_EXISTS`，并带上同一路径，不打印文件内容。数据目录和文件只允许当前用户访问。
 
-模板没有口令字段。`sshAlias` 选择 OpenSSH 主机别名。命令没有 `--ssh` 时使用该别名。`host`、`user`、`port`、`knownHostsPath` 和 `authMethod` 仍只作校验和记录，不会变成另一条连接。主机、用户和端口仍来自 `ssh -G`，再由命令行固定。`BatchMode=yes`、`StrictHostKeyChecking=yes`、`ForwardAgent=no` 和 `ClearAllForwardings=yes` 写在命令行上，SSH 配置文件不能把它们改松。`vpn.example.invalid` 和 `example-user` 只是占位符。
+模板没有口令字段。`allowCidrs` 是空列表。主机加固不会把这个空列表当成网络，也不会自己编一个网段。文档里的 `203.0.113.0/24` 是保留地址，不是操作员的广域网。`sshAlias` 选择 OpenSSH 主机别名。命令没有 `--ssh` 时使用该别名。`host`、`user`、`port`、`knownHostsPath` 和 `authMethod` 仍只作校验和记录，不会变成另一条连接。主机、用户和端口仍来自 `ssh -G`，再由命令行固定。`BatchMode=yes`、`StrictHostKeyChecking=yes`、`ForwardAgent=no` 和 `ClearAllForwardings=yes` 写在命令行上，SSH 配置文件不能把它们改松。`vpn.example.invalid` 和 `example-user` 只是占位符。
 
 `ssh.configPath` 是要传给 OpenSSH 的配置文件路径。写了这一项时，`ssh -G` 和随后的实际连接都会带上 `ssh -F` 指向该文件。OpenSSH 因此使用这个文件，并且不再读取系统级 `ssh_config`。删掉 `configPath` 则不传 `-F`，仍由 OpenSSH 查找默认配置。`identityFile` 只保存私钥路径，不保存私钥内容。写了这一项时，实际连接追加 `ssh -i` 和 `IdentitiesOnly=yes`，用来设置 IdentityFile，并且不使用 ssh-agent 里的其他密钥。`ssh -G` 不带 `-i`，也不会读取私钥内容。删掉 `identityFile` 则不传 `-i`，密钥仍由 SSH 配置或 ssh-agent 提供。
 
@@ -53,6 +53,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Yes -
 ```powershell
 routequay --help
 routequay setup example-node --plan
+routequay harden example-node --plan
 routequay status example-node
 routequay add-client example-node --plan
 routequay group example-node create self
@@ -60,7 +61,7 @@ routequay group example-node add-member self --client inbound-1-client-1
 routequay pull example-node
 ```
 
-`example-node` 是操作员自己的 SSH 主机别名。用户数据根里还没有该节点的本地状态时，`pull` 在 SSH 之前返回 `SETUP_REQUIRED`。`vpncp` 是同一程序的兼容命令。不会安装 `rq`。未使用安装器时，仍可在仓库目录运行 `.\routequay.cmd` 或 `.\vpncp.cmd`。
+`harden --plan` 不修改远端主机。安装器不会执行它。`example-node` 是操作员自己的 SSH 主机别名。用户数据根里还没有该节点的本地状态时，`pull` 在 SSH 之前返回 `SETUP_REQUIRED`。`vpncp` 是同一程序的兼容命令。不会安装 `rq`。未使用安装器时，仍可在仓库目录运行 `.\routequay.cmd` 或 `.\vpncp.cmd`。
 
 ## 更新与卸载
 

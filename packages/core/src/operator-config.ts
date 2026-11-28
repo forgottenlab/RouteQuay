@@ -1,6 +1,7 @@
 import { lstatSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { canonicalCidr } from './host-harden.ts';
 import { AdoptionError, privateWrite, type SshClientFiles } from './xray-adoption.ts';
 import { defaultUserDataDir, expandUserPath } from './install-layout.ts';
 
@@ -11,9 +12,9 @@ const nodeIdPattern = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
 const aliasPattern = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 const hostPattern = /^[a-zA-Z0-9][a-zA-Z0-9.:_-]*$/;
 const userPattern = /^[a-zA-Z_][a-zA-Z0-9_.-]*\$?$/;
-const rootKeys = new Set(['schemaVersion', 'ssh', 'dataDir', 'nodes']);
+const rootKeys = new Set(['schemaVersion', 'ssh', 'dataDir', 'nodes', 'allowCidrs']);
 const sshKeys = new Set(['configPath', 'knownHostsPath']);
-const nodeKeys = new Set(['id', 'displayName', 'sshAlias', 'host', 'user', 'port', 'identityFile', 'authMethod']);
+const nodeKeys = new Set(['id', 'displayName', 'sshAlias', 'host', 'user', 'port', 'identityFile', 'authMethod', 'allowCidrs']);
 
 export type OperatorAuthMethod = 'ssh-config' | 'ssh-key' | 'agent';
 export type OperatorNode = {
@@ -25,11 +26,13 @@ export type OperatorNode = {
   port?: number;
   identityFile?: string;
   authMethod?: OperatorAuthMethod;
+  allowCidrs?: string[];
 };
 export type OperatorConfig = {
   schemaVersion: typeof OPERATOR_SCHEMA;
   ssh?: { configPath?: string; knownHostsPath?: string };
   dataDir?: string;
+  allowCidrs?: string[];
   nodes: OperatorNode[];
 };
 
@@ -102,7 +105,21 @@ function assertNode(value: unknown): OperatorNode {
     if (input.authMethod !== 'ssh-config' && input.authMethod !== 'ssh-key' && input.authMethod !== 'agent') invalid();
     node.authMethod = input.authMethod;
   }
+  if (input.allowCidrs !== undefined) node.allowCidrs = readCidrs(input.allowCidrs);
   return node;
+}
+
+function readCidrs(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > 16) invalid();
+  const cidrs: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string') invalid();
+    try {
+      const cidr = canonicalCidr(item);
+      if (!cidrs.includes(cidr)) cidrs.push(cidr);
+    } catch { invalid(); }
+  }
+  return cidrs;
 }
 
 export function validateOperatorConfig(value: unknown): OperatorConfig {
@@ -121,6 +138,7 @@ export function validateOperatorConfig(value: unknown): OperatorConfig {
     if (ssh.knownHostsPath !== undefined) config.ssh.knownHostsPath = assertPath(ssh.knownHostsPath);
   }
   if (input.dataDir !== undefined) config.dataDir = assertPath(input.dataDir);
+  if (input.allowCidrs !== undefined) config.allowCidrs = readCidrs(input.allowCidrs);
   if (!Array.isArray(input.nodes)) invalid();
   const ids = new Set<string>();
   for (const item of input.nodes) {
@@ -196,6 +214,14 @@ export function operatorSshFiles(config: OperatorConfig | null, nodeId: string, 
   const identityFile = config.nodes.find(node => node.id === nodeId)?.identityFile;
   if (identityFile) files.identityFile = sshOperandPath(identityFile, home);
   return files;
+}
+
+export function operatorAllowCidrs(config: OperatorConfig | null, nodeId: string): string[] {
+  if (!config) return [];
+  const node = config.nodes.find(item => item.id === nodeId)?.allowCidrs ?? [];
+  const merged: string[] = [];
+  for (const cidr of [...(config.allowCidrs ?? []), ...node]) if (!merged.includes(cidr)) merged.push(cidr);
+  return merged;
 }
 
 export function applyOperatorSshAlias<T extends { nodeId: string; ssh?: string }>(options: T, config: OperatorConfig | null): T & { ssh?: string } {

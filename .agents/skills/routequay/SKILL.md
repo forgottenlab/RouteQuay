@@ -1,8 +1,8 @@
 ---
 name: routequay
 description: >-
-  用本机的 routequay 命令查看节点、把官方客户端文件带回本地路径、追加一个人或一台设备、导出一种文件，或整理本机分组。
-  Use when the operator asks to check a node, bring official client files back as local paths, append one person or device, export one file, or organize local groups.
+  用本机的 routequay 命令查看节点、把官方客户端文件带回本地路径、追加一个人或一台设备、导出一种文件、整理本机分组，或查看/执行主机加固计划。
+  Use when the operator asks to check a node, bring official client files back as local paths, append one person or device, export one file, organize local groups, or plan/apply the host hardening pack.
   Drive only the existing CLI. Do not print secret material, and do not install anything on the remote host.
 ---
 
@@ -23,6 +23,7 @@ Path A 是产品。不加载本技能时，`routequay` 仍然完整可用。本�
 - 追加一个人或一台设备
 - 整理本机分组
 - 导出一种现行文件，或执行帮助里已经列出的其他命令
+- 查看或执行主机加固计划
 
 ## 只汇报这些
 
@@ -47,7 +48,7 @@ Path A 是产品。不加载本技能时，`routequay` 仍然完整可用。本�
 
 不要把密钥路径或 SSH 配置文件路径传给 `ssh`。`--ssh` 只接受操作员已经配好的 Host 别名。用不到的路径不要加，也不要写占位路径。
 
-`setup` 和 `add-client` 在非交互，或带了 `--json` 时，没有 `--apply` 不会自己执行。返回 `INSTALL_APPROVAL_REQUIRED` 或 `CLIENT_APPROVAL_REQUIRED` 就停下来汇报代码。不要改用管道，不要手改配置，不要发明另一个开关。操作员没有明确要求执行时，只用 `--plan`。交互终端不带这两个参数时，由 CLI 自己询问一次，不要替操作员回答。
+`setup`、`add-client` 和 `harden` 在非交互，或带了 `--json` 时，没有 `--apply` 不会自己执行。返回 `INSTALL_APPROVAL_REQUIRED`、`CLIENT_APPROVAL_REQUIRED` 或 `HARDEN_APPROVAL_REQUIRED` 就停下来汇报代码。不要改用管道，不要手改配置，不要发明另一个开关。操作员没有明确要求执行时，只用 `--plan`。交互终端不带这两个参数时，由 CLI 自己询问一次，不要替操作员回答。
 
 分组命令没有 `--plan` 和 `--apply`。不要给它们加上这两个参数。只有操作员点名要创建、改名、删除或调整成员时才运行对应子命令。`remove` 只删除这条本地分组，不删除远程客户端。
 
@@ -58,7 +59,7 @@ Path A 是产品。不加载本技能时，`routequay` 仍然完整可用。本�
 `example-node` 是操作员自己的 SSH 主机别名，不是预设服务器。省略 `--out` 时，文件写到当前私有数据目录；CLI 会打印路径。操作员没有指定目录时，不要另选一个目录。带 `--out` 时，那个目录必须已经存在。
 
 ```text
-allowed-commands: setup status endpoint export pull add-client group init-config
+allowed-commands: setup status endpoint export pull add-client group init-config harden
 routequay status example-node
 routequay pull example-node --client inbound-1-client-1
 routequay pull example-node --group self
@@ -77,6 +78,8 @@ routequay group example-node remove-member self --client inbound-1-client-1
 routequay group example-node remove self
 routequay setup example-node --plan
 routequay setup example-node --apply
+routequay harden example-node --plan
+routequay harden example-node --apply
 routequay init-config
 ```
 
@@ -88,12 +91,14 @@ routequay init-config
 
 `group` 不连接服务器。分组名由操作员决定。文件残缺时代码是 `GROUP_STORE_INVALID`，不要手改那个文件。
 
-`setup --plan` 只读。已有实例走接管，不为了重装而替换配置。CLI 不调整防火墙或 SSH 配置。若结果里出现 `CHECK_FIREWALL_AND_CLOUD_RULES`，只汇报这个代码，不要自己改规则。
+`setup --plan` 只读。已有实例走接管，不为了重装而替换配置。`setup` 不调整防火墙或 SSH 配置。若结果里出现 `CHECK_FIREWALL_AND_CLOUD_RULES`，只汇报这个代码。不要在 `setup` 里改规则，也不要因此自动执行 `harden --apply`。
+
+`harden` 只做三件事：按来源限制的主机防火墙、SSH 仅密钥，以及 Xray 的 systemd 沙箱。防火墙优先 nftables；只有 ufw 或 firewalld 已经是活动防火墙时才改用它。只追加操作员给出的网段，不删除已有放行。网段来自操作员这次给出的 `--cidr`，或本机配置里已经写好的 `allowCidrs`。不要编造网段，也不要使用文档里的保留地址。当前 SSH 来源没有被覆盖时，命令会拒绝，不要改用别的办法继续。云安全组不创建、不覆盖、不删除。`harden` 不安装 Fail2ban，也不配置 CrowdSec、AppArmor、AIDE、auditd、Netdata、Prometheus 或 Grafana。
 
 `init-config` 只打印路径。文件已存在时退出码 2，输出仍然只有路径。不要打开该文件。
 
 ## 还没有的命令
 
-主机防火墙、安全组，以及一套固定的安全默认，都还不是 CLI 命令。不要执行它们，也不要假装命令已经存在。等 CLI 自己提供之后，再只通过那些命令操作。
+没有单独的云安全组命令。不要创建、覆盖或删除安全组规则，也不要假装 `harden` 会做这件事。
 
 不要从本技能创建 GitHub Release、关闭 Issue、新增 CI，或做 Web 管理界面。不要另做一套连通性测试。操作员要求的那一条 CLI 命令就是全部动作。

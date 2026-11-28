@@ -30,7 +30,7 @@ for (const rule of ['UUID', '私钥', '密码', '--plan', '--apply', 'minClientV
 const allowed = fences.match(/allowed-commands:[ \t]*([^\n]+)/);
 assert.ok(allowed);
 const commands = allowed[1].split(/\s+/);
-assert.deepEqual(commands, ['setup', 'status', 'endpoint', 'export', 'pull', 'add-client', 'group', 'init-config']);
+assert.deepEqual(commands, ['setup', 'status', 'endpoint', 'export', 'pull', 'add-client', 'group', 'init-config', 'harden']);
 const help = spawnSync(process.execPath, ['apps/cli/src/vpncp.ts', '--help'], { encoding: 'utf8' });
 assert.equal(help.status, 0);
 for (const command of [...commands, 'add-member', 'remove-member', 'vless-qr', 'mihomo-provider', 'mihomo-profile', 'sing-box']) {

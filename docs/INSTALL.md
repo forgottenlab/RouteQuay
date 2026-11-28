@@ -40,7 +40,7 @@ If dependency installation fails, the command prints one JSON object. `code` is 
 
 `routequay init-config` copies `examples/operator-config.example.json` to `%USERPROFILE%\.routequay\config.json` when that file is missing, and prints that path only. `init` is the same command. An existing file is left unchanged: the command exits 2 and still prints only that path. With `--json`, the failure object uses code `OPERATOR_CONFIG_EXISTS` and includes that same path; it does not print the file. The data directory and file are private to the current user.
 
-The template has no password field. `sshAlias` selects an OpenSSH host alias. A command that omits `--ssh` uses that alias. `host`, `user`, `port`, `knownHostsPath`, and `authMethod` are still validated and recorded only. They do not open a second connection. Host, user, and port still come from `ssh -G` and are then pinned on the command line. `BatchMode=yes`, `StrictHostKeyChecking=yes`, `ForwardAgent=no`, and `ClearAllForwardings=yes` stay on the command line, so the SSH config file cannot relax them. `vpn.example.invalid` and `example-user` are placeholders.
+The template has no password field. `allowCidrs` is an empty list. A host-hardening apply does not treat that empty list as a network, and it does not invent one. `203.0.113.0/24` in the docs is a documentation range, not an operator WAN. `sshAlias` selects an OpenSSH host alias. A command that omits `--ssh` uses that alias. `host`, `user`, `port`, `knownHostsPath`, and `authMethod` are still validated and recorded only. They do not open a second connection. Host, user, and port still come from `ssh -G` and are then pinned on the command line. `BatchMode=yes`, `StrictHostKeyChecking=yes`, `ForwardAgent=no`, and `ClearAllForwardings=yes` stay on the command line, so the SSH config file cannot relax them. `vpn.example.invalid` and `example-user` are placeholders.
 
 `ssh.configPath` is the SSH config file passed to OpenSSH. When it is set, both `ssh -G` and the later connection receive `ssh -F` pointed at that file. OpenSSH then uses that file and does not read the system `ssh_config`. Omit `configPath` to leave `-F` unset and keep OpenSSH's default lookup. `identityFile` stores a private-key path, not the key itself. When it is set, the connection adds `ssh -i` and `IdentitiesOnly=yes`, which sets IdentityFile and does not use other keys from ssh-agent. `ssh -G` does not receive `-i` and does not read the key. Omit `identityFile` to leave `-i` unset; OpenSSH then uses the key from the SSH config or from ssh-agent.
 
@@ -53,6 +53,7 @@ Open a new terminal after PATH is changed:
 ```powershell
 routequay --help
 routequay setup example-node --plan
+routequay harden example-node --plan
 routequay status example-node
 routequay add-client example-node --plan
 routequay group example-node create self
@@ -60,7 +61,7 @@ routequay group example-node add-member self --client inbound-1-client-1
 routequay pull example-node
 ```
 
-`example-node` is an SSH host alias configured by the operator. When the user data root has no local state for that node, `pull` returns `SETUP_REQUIRED` before SSH. `vpncp` is the compatibility command for the same program. `rq` is not installed. Running `.\routequay.cmd` or `.\vpncp.cmd` from a checkout still works when the installer has not been used.
+`harden --plan` does not change the remote host. The installer does not run it. `example-node` is an SSH host alias configured by the operator. When the user data root has no local state for that node, `pull` returns `SETUP_REQUIRED` before SSH. `vpncp` is the compatibility command for the same program. `rq` is not installed. Running `.\routequay.cmd` or `.\vpncp.cmd` from a checkout still works when the installer has not been used.
 
 ## Update and uninstall
 

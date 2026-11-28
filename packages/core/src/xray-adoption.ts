@@ -276,7 +276,7 @@ export function configDigest(config: unknown): string {
 }
 
 // Shared by endpoint commits and exports, including the entire export probe.
-function withNodeLock(directory: string, action: () => AdoptionResult): AdoptionResult {
+export function withNodeLock(directory: string, action: () => AdoptionResult): AdoptionResult {
   assertNoLinks(directory);
   const lock = join(directory, 'operation.lock');
   const owner = randomUUID();
